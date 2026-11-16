@@ -1,0 +1,761 @@
+import json
+import random
+from datetime import datetime, timedelta, timezone
+from fastapi import HTTPException
+from pydantic import BaseModel
+from common.app_factory import create_service_app
+from common.db import get_conn, compute_cart_hash
+
+app = create_service_app("Retail POS & Shop Manager Service")
+
+
+def calculate_totals(items: list[dict], discount_amount: float = 0.0) -> dict:
+    subtotal = round(sum(float(i.get("qty", 0)) * float(i.get("unit_price", 0)) for i in items), 2)
+    disc = min(round(discount_amount, 2), subtotal)
+    taxable_ratio = (subtotal - disc) / subtotal if subtotal > 0 else 1.0
+    total_gst = 0.0
+    for i in items:
+        line_amt = float(i.get("qty", 0)) * float(i.get("unit_price", 0)) * taxable_ratio
+        gst_pct = float(i.get("gst_pct", 5.0))
+        total_gst += line_amt * (gst_pct / 100.0)
+    cgst = round(total_gst / 2.0, 2)
+    sgst = round(total_gst / 2.0, 2)
+    grand_total = round((subtotal - disc) + cgst + sgst, 2)
+    return {"subtotal": subtotal, "discount_amount": disc, "cgst": cgst, "sgst": sgst, "grand_total": grand_total}
+
+
+def deduct_fefo_stock(conn, outlet_code: str, items: list[dict], ref_no: str, actor: str):
+    store_code = f"STR-{outlet_code}-BACK"
+    for idx, item in enumerate(items):
+        qty_needed = float(item.get("qty", 0))
+        if qty_needed <= 0:
+            continue
+        batches = conn.execute(
+            """
+            SELECT * FROM stores_mod.stock_batches
+            WHERE store_code = %s AND sku = %s AND qty > 0
+            ORDER BY expiry_date ASC, id ASC
+            """,
+            (store_code, item["sku"]),
+        ).fetchall()
+        rem = qty_needed
+        for b in batches:
+            if rem <= 0:
+                break
+            take = min(float(b["qty"]), rem)
+            conn.execute("UPDATE stores_mod.stock_batches SET qty = qty - %s WHERE id = %s", (take, b["id"]))
+            mov_no = f"MOV-POS-{int(datetime.now().timestamp() * 1000) % 1000000}-{idx}-{b['id']}"
+            conn.execute(
+                """
+                INSERT INTO stores_mod.stock_movements (movement_no, movement_type, store_code, sku, batch_no, qty, uom, reason_code, ref_no, actor)
+                VALUES (%s,'POS_SALE',%s,%s,%s,%s,%s,'POS FEFO Delivery Deduction',%s,%s)
+                """,
+                (mov_no, store_code, item["sku"], b["batch_no"], take, b["uom"], ref_no, actor),
+            )
+            rem = round(rem - take, 3)
+
+
+class EstimateCreate(BaseModel):
+    outlet_code: str = "DEL01"
+    mode: str = "3_COUNTER"
+    items: list[dict]
+    estimate_staff: str = "Counter Staff 1"
+
+
+class CartUpdate(BaseModel):
+    items: list[dict]
+
+
+class PromoApply(BaseModel):
+    promo_code: str
+
+
+class OtpRequestPayload(BaseModel):
+    estimate_no: str
+    category: str
+    beneficiary: str
+    discount_pct: float
+    reason: str = ""
+
+
+class OtpVerifyPayload(BaseModel):
+    otp_id: int
+    otp_code: str
+
+
+class PaymentPayload(BaseModel):
+    payment_splits: list[dict]
+    cashier_id: str = "Priya Sharma"
+
+
+class DeliveryScanPayload(BaseModel):
+    barcode: str
+    delivery_staff: str = "Mohan Packing"
+    manager_override: bool = False
+    outlet_code: str | None = None
+
+
+class PromoCreate(BaseModel):
+    code: str
+    name: str
+    rule_type: str
+    value: float
+    min_bill: float = 0
+    max_cap: float = 500
+    stackable: bool = False
+
+
+class IndentCreate(BaseModel):
+    outlet_code: str
+    sku: str
+    qty: float
+    priority: str = "HIGH"
+
+
+class ShiftClosePayload(BaseModel):
+    shift_id: int
+    declared_cash: float
+
+
+def find_order_by_code_or_last4(
+    conn,
+    raw_code: str,
+    outlet_code: str | None = None,
+    prefer_status: str | None = None,
+):
+    code = raw_code.strip().upper()
+    if not code:
+        return None
+    # 1. Exact barcode match on estimate_no or invoice_no
+    order = conn.execute(
+        "SELECT * FROM pos_mod.pos_orders WHERE UPPER(estimate_no) = %s OR UPPER(COALESCE(invoice_no, '')) = %s ORDER BY id DESC LIMIT 1",
+        (code, code),
+    ).fetchone()
+    if order:
+        return order
+
+    # 2. Last 4 numeric digits (or 1-6 digit numeric suffix) manual lookup
+    if code.isdigit():
+        suffix = code[-4:].zfill(4) if len(code) <= 4 else code
+        slen = len(suffix)
+        outlet_clause = "AND outlet_code = %s" if outlet_code else ""
+        params: list = [slen, suffix, slen, suffix]
+        if outlet_code:
+            params.append(outlet_code)
+        status_rank = (
+            "CASE WHEN status = %s THEN 0 WHEN status = 'PAID_PENDING_DELIVERY' THEN 1 WHEN status = 'ESTIMATE_GENERATED' THEN 2 ELSE 3 END"
+            if prefer_status
+            else "CASE WHEN status = 'PAID_PENDING_DELIVERY' THEN 0 WHEN status = 'ESTIMATE_GENERATED' THEN 1 ELSE 2 END"
+        )
+        if prefer_status:
+            params.append(prefer_status)
+        order = conn.execute(
+            f"""
+            SELECT * FROM pos_mod.pos_orders
+            WHERE (RIGHT(estimate_no, %s) = %s OR RIGHT(COALESCE(invoice_no, ''), %s) = %s)
+              {outlet_clause}
+            ORDER BY {status_rank}, id DESC
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        if order:
+            return order
+
+        # Fallback across all outlets if current outlet had no suffix match
+        if outlet_code:
+            fparams: list = [slen, suffix, slen, suffix]
+            if prefer_status:
+                fparams.append(prefer_status)
+            order = conn.execute(
+                f"""
+                SELECT * FROM pos_mod.pos_orders
+                WHERE (RIGHT(estimate_no, %s) = %s OR RIGHT(COALESCE(invoice_no, ''), %s) = %s)
+                ORDER BY {status_rank}, id DESC
+                LIMIT 1
+                """,
+                tuple(fparams),
+            ).fetchone()
+            if order:
+                return order
+
+    return None
+
+
+@app.get("/orders")
+def list_pos_orders(outlet_code: str | None = None):
+    with get_conn() as conn:
+        if outlet_code:
+            return conn.execute(
+                "SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s ORDER BY id DESC LIMIT 100",
+                (outlet_code,),
+            ).fetchall()
+        return conn.execute("SELECT * FROM pos_mod.pos_orders ORDER BY id DESC LIMIT 100").fetchall()
+
+
+@app.get("/orders/scan/{barcode}")
+def scan_pos_order(barcode: str, outlet_code: str | None = None, prefer_status: str | None = None):
+    code = barcode.strip().upper()
+    with get_conn() as conn:
+        order = find_order_by_code_or_last4(conn, code, outlet_code=outlet_code, prefer_status=prefer_status)
+        if not order:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No Estimate or Invoice found for '{code}' (enter full ID or last 4 digits)",
+            )
+        return order
+
+
+@app.post("/estimates")
+def create_estimate(payload: EstimateCreate):
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Cart cannot be empty")
+    with get_conn() as conn:
+        cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.pos_orders").fetchone()["c"] + 42
+        est_no = f"EST-{payload.outlet_code}-{cnt:04d}"
+        totals = calculate_totals(payload.items, 0.0)
+        c_hash = compute_cart_hash(payload.items)
+        return conn.execute(
+            """
+            INSERT INTO pos_mod.pos_orders
+            (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, estimate_staff)
+            VALUES (%s,%s,%s,'ESTIMATE_GENERATED',%s::jsonb,%s,0,%s,%s,%s,%s,%s) RETURNING *
+            """,
+            (
+                est_no, payload.outlet_code, payload.mode, json.dumps(payload.items),
+                totals["subtotal"], c_hash, totals["cgst"], totals["sgst"],
+                totals["grand_total"], payload.estimate_staff,
+            ),
+        ).fetchone()
+
+
+@app.put("/orders/{estimate_no}/cart")
+def update_cart(estimate_no: str, payload: CartUpdate):
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (estimate_no,)).fetchone()
+        if not order:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        if order["status"] != "ESTIMATE_GENERATED":
+            raise HTTPException(status_code=400, detail="Cannot edit cart after payment")
+        new_hash = compute_cart_hash(payload.items)
+        discount_amt = float(order["discount_amount"] or 0)
+        discount_type = order["discount_type"]
+        discount_cat = order["discount_category"]
+        otp_id = order["discount_otp_id"]
+        tamper_alert = False
+
+        # Anti-tampering rule from spec Section 4.2.4!
+        if discount_type == "AD_HOC_OTP" and new_hash != order["cart_hash"]:
+            discount_amt = 0.0
+            discount_type = None
+            discount_cat = None
+            tamper_alert = True
+            if otp_id:
+                conn.execute(
+                    "UPDATE pos_mod.otp_requests SET status = 'INVALIDATED_CART_CHANGE' WHERE id = %s",
+                    (otp_id,),
+                )
+                otp_id = None
+
+        totals = calculate_totals(payload.items, discount_amt)
+        updated = conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET items = %s::jsonb, subtotal = %s, discount_type = %s, discount_category = %s,
+                discount_amount = %s, discount_otp_id = %s, cart_hash = %s, cgst = %s, sgst = %s, grand_total = %s
+            WHERE estimate_no = %s RETURNING *
+            """,
+            (
+                json.dumps(payload.items), totals["subtotal"], discount_type, discount_cat,
+                totals["discount_amount"], otp_id, new_hash, totals["cgst"], totals["sgst"],
+                totals["grand_total"], estimate_no,
+            ),
+        ).fetchone()
+        return {"order": updated, "tamper_invalidated": tamper_alert}
+
+
+@app.post("/orders/{estimate_no}/apply-promo")
+def apply_promo(estimate_no: str, payload: PromoApply):
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (estimate_no,)).fetchone()
+        promo = conn.execute("SELECT * FROM pos_mod.promos WHERE code = %s AND active = TRUE", (payload.promo_code.upper(),)).fetchone()
+        if not order or not promo:
+            raise HTTPException(status_code=404, detail="Order or active Promo not found")
+        subtotal = float(order["subtotal"])
+        if subtotal < float(promo["min_bill"]):
+            raise HTTPException(status_code=400, detail=f"Minimum bill ₹{promo['min_bill']} required for {promo['code']}")
+        if promo["rule_type"] == "PERCENT":
+            disc = min(subtotal * (float(promo["value"]) / 100.0), float(promo["max_cap"]))
+        else:
+            disc = min(float(promo["value"]), float(promo["max_cap"]))
+        totals = calculate_totals(order["items"], disc)
+        return conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET discount_type = 'PROMO', discount_category = %s, discount_amount = %s,
+                cgst = %s, sgst = %s, grand_total = %s
+            WHERE estimate_no = %s RETURNING *
+            """,
+            (promo["code"], totals["discount_amount"], totals["cgst"], totals["sgst"], totals["grand_total"], estimate_no),
+        ).fetchone()
+
+
+@app.post("/otp/request")
+def request_adhoc_otp(payload: OtpRequestPayload):
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (payload.estimate_no,)).fetchone()
+        if not order:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        approver = conn.execute(
+            "SELECT * FROM pos_mod.approvers WHERE category = %s LIMIT 1", (payload.category,)
+        ).fetchone()
+        if not approver:
+            raise HTTPException(status_code=404, detail=f"No approver configured for category {payload.category}")
+        if payload.discount_pct > float(approver["max_pct"]):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{payload.category} max discount cap is {approver['max_pct']}%",
+            )
+        disc_amt = round(float(order["subtotal"]) * (payload.discount_pct / 100.0), 2)
+        if float(approver["used_quota"]) + disc_amt > float(approver["monthly_quota"]):
+            raise HTTPException(status_code=400, detail=f"Monthly quota exceeded for {payload.category}")
+
+        otp_code = f"{random.randint(100000, 999999)}"
+        sms_msg = (
+            f"OTP {otp_code} for {payload.discount_pct:.0f}% {payload.category} Discount "
+            f"Rs.{disc_amt:.0f} ({payload.beneficiary}) on {order['estimate_no']} at Outlet {order['outlet_code']}. Valid 5 mins. - Annavya"
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        otp_row = conn.execute(
+            """
+            INSERT INTO pos_mod.otp_requests
+            (otp_code, estimate_no, outlet_code, category, beneficiary, discount_pct, discount_amount,
+             cart_hash, approver_name, approver_mobile, sms_message, reason, expires_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *
+            """,
+            (
+                otp_code, order["estimate_no"], order["outlet_code"], payload.category,
+                payload.beneficiary, payload.discount_pct, disc_amt, order["cart_hash"],
+                approver["name"], approver["mobile"], sms_msg, payload.reason, expires_at,
+            ),
+        ).fetchone()
+        return otp_row
+
+
+@app.post("/otp/verify")
+def verify_adhoc_otp(payload: OtpVerifyPayload):
+    with get_conn() as conn:
+        otp = conn.execute("SELECT * FROM pos_mod.otp_requests WHERE id = %s", (payload.otp_id,)).fetchone()
+        if not otp:
+            raise HTTPException(status_code=404, detail="OTP request not found")
+        if otp["status"] in ("LOCKED", "EXPIRED", "INVALIDATED_CART_CHANGE"):
+            raise HTTPException(status_code=400, detail=f"OTP is {otp['status']}")
+        if datetime.now(timezone.utc) > otp["expires_at"]:
+            conn.execute("UPDATE pos_mod.otp_requests SET status = 'EXPIRED' WHERE id = %s", (otp["id"],))
+            raise HTTPException(status_code=400, detail="OTP expired (5 min window elapsed)")
+        if payload.otp_code.strip() != otp["otp_code"]:
+            attempts = int(otp["attempts"]) + 1
+            new_st = "LOCKED" if attempts >= 3 else "PENDING"
+            conn.execute("UPDATE pos_mod.otp_requests SET attempts = %s, status = %s WHERE id = %s", (attempts, new_st, otp["id"]))
+            if new_st == "LOCKED":
+                raise HTTPException(status_code=403, detail="3 Invalid OTP attempts! Discount locked & Shop Manager alerted.")
+            raise HTTPException(status_code=400, detail=f"Invalid OTP. {3 - attempts} attempts remaining.")
+
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (otp["estimate_no"],)).fetchone()
+        if order["cart_hash"] != otp["cart_hash"]:
+            conn.execute("UPDATE pos_mod.otp_requests SET status = 'INVALIDATED_CART_CHANGE' WHERE id = %s", (otp["id"],))
+            raise HTTPException(status_code=409, detail="Cart was modified after OTP request. Request a fresh OTP.")
+
+        totals = calculate_totals(order["items"], float(otp["discount_amount"]))
+        conn.execute("UPDATE pos_mod.otp_requests SET status = 'VERIFIED' WHERE id = %s", (otp["id"],))
+        conn.execute(
+            "UPDATE pos_mod.approvers SET used_quota = used_quota + %s WHERE category = %s",
+            (float(otp["discount_amount"]), otp["category"]),
+        )
+        updated_order = conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET discount_type = 'AD_HOC_OTP', discount_category = %s, discount_amount = %s,
+                discount_otp_id = %s, cgst = %s, sgst = %s, grand_total = %s
+            WHERE estimate_no = %s RETURNING *
+            """,
+            (
+                otp["category"], totals["discount_amount"], otp["id"],
+                totals["cgst"], totals["sgst"], totals["grand_total"], otp["estimate_no"],
+            ),
+        ).fetchone()
+        return {"verified": True, "order": updated_order}
+
+
+@app.post("/orders/{estimate_no}/pay")
+def collect_payment(estimate_no: str, payload: PaymentPayload):
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (estimate_no,)).fetchone()
+        if not order:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        if order["status"] != "ESTIMATE_GENERATED":
+            raise HTTPException(status_code=400, detail=f"Order already in status {order['status']}")
+        paid_sum = round(sum(float(p.get("amount", 0)) for p in payload.payment_splits), 2)
+        if paid_sum + 0.5 < float(order["grand_total"]):
+            raise HTTPException(status_code=400, detail=f"Paid ₹{paid_sum} is less than Grand Total ₹{order['grand_total']}")
+
+        cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.pos_orders WHERE invoice_no IS NOT NULL").fetchone()["c"] + 40
+        inv_no = f"INV-{order['outlet_code']}-{cnt:04d}"
+        is_direct = order["mode"] == "DIRECT"
+        next_status = "DELIVERED_CLOSED" if is_direct else "PAID_PENDING_DELIVERY"
+
+        updated = conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET invoice_no = %s, status = %s, payment_splits = %s::jsonb, cashier_id = %s,
+                paid_at = NOW(), delivered_at = CASE WHEN %s THEN NOW() ELSE NULL END,
+                delivery_staff = CASE WHEN %s THEN %s ELSE NULL END
+            WHERE estimate_no = %s RETURNING *
+            """,
+            (
+                inv_no, next_status, json.dumps(payload.payment_splits), payload.cashier_id,
+                is_direct, is_direct, payload.cashier_id, estimate_no,
+            ),
+        ).fetchone()
+
+        # Update cashier cash shift if Cash used
+        cash_paid = sum(float(p.get("amount", 0)) for p in payload.payment_splits if str(p.get("mode", "")).upper() == "CASH")
+        if cash_paid > 0:
+            conn.execute(
+                """
+                UPDATE pos_mod.shifts SET system_cash_sales = system_cash_sales + %s
+                WHERE outlet_code = %s AND status = 'OPEN'
+                """,
+                (cash_paid, order["outlet_code"]),
+            )
+
+        if is_direct:
+            deduct_fefo_stock(conn, order["outlet_code"], order["items"], inv_no, payload.cashier_id)
+
+        return updated
+
+
+@app.post("/delivery/scan")
+def scan_at_delivery(payload: DeliveryScanPayload):
+    code = payload.barcode.strip().upper()
+    with get_conn() as conn:
+        order = find_order_by_code_or_last4(
+            conn,
+            code,
+            outlet_code=payload.outlet_code,
+            prefer_status="PAID_PENDING_DELIVERY",
+        )
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Invoice / Barcode '{code}' not recognized")
+        if order["status"] == "ESTIMATE_GENERATED":
+            raise HTTPException(
+                status_code=400,
+                detail=f"PAYMENT PENDING! '{order['estimate_no']}' is an unpaid Estimate Slip. Direct customer to Cash Counter.",
+            )
+        if order["status"] == "DELIVERED_CLOSED" and not payload.manager_override:
+            raise HTTPException(
+                status_code=409,
+                detail=f"ALREADY DELIVERED AT {order['delivered_at']} BY {order['delivery_staff']}! Duplicate handover blocked.",
+            )
+        updated = conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET status = 'DELIVERED_CLOSED', delivery_staff = %s, delivered_at = NOW()
+            WHERE id = %s RETURNING *
+            """,
+            (payload.delivery_staff, order["id"]),
+        ).fetchone()
+        deduct_fefo_stock(conn, order["outlet_code"], order["items"], order["invoice_no"] or order["estimate_no"], payload.delivery_staff)
+        return updated
+
+
+@app.get("/shop/overview")
+def shop_manager_overview(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        store_code = f"STR-{outlet_code}-BACK"
+        stock = conn.execute(
+            "SELECT * FROM stores_mod.stock_batches WHERE store_code = %s AND qty > 0 ORDER BY expiry_date ASC",
+            (store_code,),
+        ).fetchall()
+        promos = conn.execute("SELECT * FROM pos_mod.promos ORDER BY id DESC").fetchall()
+        approvers = conn.execute("SELECT * FROM pos_mod.approvers ORDER BY id").fetchall()
+        otps = conn.execute("SELECT * FROM pos_mod.otp_requests ORDER BY created_at DESC LIMIT 20").fetchall()
+        shifts = conn.execute("SELECT * FROM pos_mod.shifts ORDER BY id DESC LIMIT 10").fetchall()
+        indents = conn.execute("SELECT * FROM pos_mod.outlet_indents ORDER BY id DESC LIMIT 15").fetchall()
+        orders = conn.execute(
+            "SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s ORDER BY id DESC LIMIT 25",
+            (outlet_code,),
+        ).fetchall()
+        return {
+            "outlet_code": outlet_code,
+            "store_code": store_code,
+            "stock": stock,
+            "promos": promos,
+            "approvers": approvers,
+            "sms_inbox": otps,
+            "shifts": shifts,
+            "indents": indents,
+            "orders": orders,
+        }
+
+
+@app.post("/shop/promos")
+def create_promo(payload: PromoCreate):
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            INSERT INTO pos_mod.promos (code, name, rule_type, value, min_bill, max_cap, stackable)
+            VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *
+            """,
+            (payload.code.upper(), payload.name, payload.rule_type, payload.value, payload.min_bill, payload.max_cap, payload.stackable),
+        ).fetchone()
+
+
+@app.patch("/shop/promos/{promo_id}/toggle")
+def toggle_promo(promo_id: int):
+    with get_conn() as conn:
+        return conn.execute("UPDATE pos_mod.promos SET active = NOT active WHERE id = %s RETURNING *", (promo_id,)).fetchone()
+
+
+@app.post("/shop/indents")
+def create_indent(payload: IndentCreate):
+    with get_conn() as conn:
+        item = conn.execute("SELECT name, inventory_uom FROM admin_mod.items WHERE sku = %s", (payload.sku,)).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="SKU not found")
+        cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.outlet_indents").fetchone()["c"] + 16
+        ind_no = f"IND-2026-{cnt:03d}"
+        return conn.execute(
+            """
+            INSERT INTO pos_mod.outlet_indents (indent_no, outlet_code, sku, item_name, qty, uom, priority, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'REQUESTED') RETURNING *
+            """,
+            (ind_no, payload.outlet_code, payload.sku, item["name"], payload.qty, item["inventory_uom"], payload.priority),
+        ).fetchone()
+
+
+@app.post("/shop/expire-eod")
+def expire_eod_estimates(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        res = conn.execute(
+            "UPDATE pos_mod.pos_orders SET status = 'EXPIRED' WHERE outlet_code = %s AND status = 'ESTIMATE_GENERATED' RETURNING estimate_no",
+            (outlet_code,),
+        ).fetchall()
+        return {"expired_count": len(res), "expired": [r["estimate_no"] for r in res]}
+
+
+@app.post("/shop/shifts/close")
+def close_shift(payload: ShiftClosePayload):
+    with get_conn() as conn:
+        sh = conn.execute("SELECT * FROM pos_mod.shifts WHERE id = %s", (payload.shift_id,)).fetchone()
+        if not sh:
+            raise HTTPException(status_code=404, detail="Shift not found")
+        expected = float(sh["opening_cash"]) + float(sh["system_cash_sales"])
+        variance = round(payload.declared_cash - expected, 2)
+        return conn.execute(
+            """
+            UPDATE pos_mod.shifts SET declared_cash = %s, variance = %s, status = 'CLOSED', closed_at = NOW()
+            WHERE id = %s RETURNING *
+            """,
+            (payload.declared_cash, variance, payload.shift_id),
+        ).fetchone()
+
+
+def normalize_tender_mode(raw_mode: str) -> str:
+    m = str(raw_mode or "").strip().upper()
+    if "CARD" in m:
+        return "Credit Card"
+    if "COUPON" in m or "SODEXO" in m or "VOUCHER" in m or "PLUXEE" in m:
+        return "Food Coupon"
+    if "CASH" in m:
+        return "Cash"
+    if "UPI" in m or "QR" in m:
+        return "UPI"
+    return "UPI"
+
+
+@app.get("/reports/eod")
+def cashier_eod_report(outlet_code: str = "DEL01", scope: str = "today"):
+    with get_conn() as conn:
+        if scope == "all":
+            orders = conn.execute(
+                "SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s ORDER BY id DESC",
+                (outlet_code,),
+            ).fetchall()
+        else:
+            orders = conn.execute(
+                """
+                SELECT * FROM pos_mod.pos_orders
+                WHERE outlet_code = %s
+                  AND (
+                    DATE(COALESCE(paid_at, created_at) AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')
+                    OR created_at >= NOW() - INTERVAL '24 hours'
+                  )
+                ORDER BY id DESC
+                """,
+                (outlet_code,),
+            ).fetchall()
+
+        shifts = conn.execute(
+            "SELECT * FROM pos_mod.shifts WHERE outlet_code = %s ORDER BY id DESC LIMIT 5",
+            (outlet_code,),
+        ).fetchall()
+
+        tender_totals = {
+            "Credit Card": {"amount": 0.0, "order_count": 0},
+            "Cash": {"amount": 0.0, "order_count": 0},
+            "UPI": {"amount": 0.0, "order_count": 0},
+            "Food Coupon": {"amount": 0.0, "order_count": 0},
+        }
+        product_map: dict[str, dict] = {}
+        orders_ledger = []
+
+        paid_orders = 0
+        pending_estimates = 0
+        pending_delivery = 0
+        delivered_orders = 0
+        gross_sales = 0.0
+        discount_total = 0.0
+        cgst_total = 0.0
+        sgst_total = 0.0
+        unmatched_orders = 0
+
+        for o in orders:
+            st = o["status"]
+            is_paid = st in ("PAID_PENDING_DELIVERY", "DELIVERED_CLOSED")
+            if st == "ESTIMATE_GENERATED":
+                pending_estimates += 1
+            elif st == "PAID_PENDING_DELIVERY":
+                pending_delivery += 1
+                paid_orders += 1
+            elif st == "DELIVERED_CLOSED":
+                delivered_orders += 1
+                paid_orders += 1
+
+            splits = list(o.get("payment_splits") or [])
+            by_cat = {"Credit Card": 0.0, "Cash": 0.0, "UPI": 0.0, "Food Coupon": 0.0}
+            seen_cats = set()
+            for sp in splits:
+                cat = normalize_tender_mode(sp.get("mode", ""))
+                amt = round(float(sp.get("amount", 0) or 0), 2)
+                by_cat[cat] = round(by_cat[cat] + amt, 2)
+                if is_paid and amt > 0:
+                    tender_totals[cat]["amount"] = round(tender_totals[cat]["amount"] + amt, 2)
+                    seen_cats.add(cat)
+            for cat in seen_cats:
+                tender_totals[cat]["order_count"] += 1
+
+            gtotal = round(float(o.get("grand_total") or 0), 2)
+            splits_sum = round(sum(by_cat.values()), 2)
+            diff = round(splits_sum - gtotal, 2) if is_paid else 0.0
+            matched = (abs(diff) <= 0.5) if is_paid else False
+            if is_paid and not matched:
+                unmatched_orders += 1
+
+            if is_paid:
+                gross_sales = round(gross_sales + gtotal, 2)
+                discount_total = round(discount_total + float(o.get("discount_amount") or 0), 2)
+                cgst_total = round(cgst_total + float(o.get("cgst") or 0), 2)
+                sgst_total = round(sgst_total + float(o.get("sgst") or 0), 2)
+
+                for it in (o.get("items") or []):
+                    sku = str(it.get("sku") or it.get("name") or "MISC")
+                    qty = float(it.get("qty") or 0)
+                    lt = float(it.get("line_total") or (qty * float(it.get("unit_price") or 0)))
+                    if sku not in product_map:
+                        product_map[sku] = {
+                            "sku": sku,
+                            "name": it.get("name") or sku,
+                            "uom": it.get("uom") or "pcs",
+                            "qty_sold": 0.0,
+                            "gross_amount": 0.0,
+                            "gst_pct": float(it.get("gst_pct") or 5),
+                            "order_ids": set(),
+                        }
+                    product_map[sku]["qty_sold"] = round(product_map[sku]["qty_sold"] + qty, 3)
+                    product_map[sku]["gross_amount"] = round(product_map[sku]["gross_amount"] + lt, 2)
+                    product_map[sku]["order_ids"].add(o["id"])
+
+            orders_ledger.append({
+                "id": o["id"],
+                "estimate_no": o["estimate_no"],
+                "invoice_no": o.get("invoice_no"),
+                "outlet_code": o["outlet_code"],
+                "mode": o["mode"],
+                "status": st,
+                "subtotal": round(float(o.get("subtotal") or 0), 2),
+                "discount_amount": round(float(o.get("discount_amount") or 0), 2),
+                "gst_total": round(float(o.get("cgst") or 0) + float(o.get("sgst") or 0), 2),
+                "grand_total": gtotal,
+                "credit_card_amt": by_cat["Credit Card"],
+                "cash_amt": by_cat["Cash"],
+                "upi_amt": by_cat["UPI"],
+                "food_coupon_amt": by_cat["Food Coupon"],
+                "splits_total": splits_sum,
+                "variance": diff,
+                "matched": matched,
+                "payment_splits": splits,
+                "cashier_id": o.get("cashier_id"),
+                "estimate_staff": o.get("estimate_staff"),
+                "delivery_staff": o.get("delivery_staff"),
+                "created_at": o["created_at"].isoformat() if o.get("created_at") else None,
+                "paid_at": o["paid_at"].isoformat() if o.get("paid_at") else None,
+                "delivered_at": o["delivered_at"].isoformat() if o.get("delivered_at") else None,
+            })
+
+        total_collected = round(sum(v["amount"] for v in tender_totals.values()), 2)
+        tender_breakdown = [
+            {
+                "category": cat,
+                "amount": round(tender_totals[cat]["amount"], 2),
+                "order_count": tender_totals[cat]["order_count"],
+                "share_pct": round((tender_totals[cat]["amount"] / total_collected) * 100, 1) if total_collected > 0 else 0.0,
+            }
+            for cat in ("Credit Card", "Cash", "UPI", "Food Coupon")
+        ]
+
+        product_breakdown = sorted(
+            [
+                {
+                    "sku": v["sku"],
+                    "name": v["name"],
+                    "uom": v["uom"],
+                    "qty_sold": v["qty_sold"],
+                    "gross_amount": v["gross_amount"],
+                    "gst_pct": v["gst_pct"],
+                    "order_count": len(v["order_ids"]),
+                }
+                for v in product_map.values()
+            ],
+            key=lambda x: x["gross_amount"],
+            reverse=True,
+        )
+
+        return {
+            "summary": {
+                "outlet_code": outlet_code,
+                "scope": scope,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "total_orders": len(orders),
+                "paid_orders": paid_orders,
+                "pending_estimates": pending_estimates,
+                "pending_delivery": pending_delivery,
+                "delivered_orders": delivered_orders,
+                "gross_sales": gross_sales,
+                "discount_total": discount_total,
+                "cgst_total": cgst_total,
+                "sgst_total": sgst_total,
+                "credit_card_total": tender_totals["Credit Card"]["amount"],
+                "cash_total": tender_totals["Cash"]["amount"],
+                "upi_total": tender_totals["UPI"]["amount"],
+                "food_coupon_total": tender_totals["Food Coupon"]["amount"],
+                "total_collected": total_collected,
+                "reconciliation_diff": round(total_collected - gross_sales, 2),
+                "unmatched_orders": unmatched_orders,
+            },
+            "tender_breakdown": tender_breakdown,
+            "product_breakdown": product_breakdown,
+            "orders_ledger": orders_ledger,
+            "shifts": shifts,
+        }
+

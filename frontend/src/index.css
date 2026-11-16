@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .thermal-paper {
+    background: repeating-linear-gradient(
+      0deg,
+      #fffef7 0px,
+      #fffef7 24px,
+      #fcfaf0 25px
+    );
+  }
+}
+
+/* Global Dark Theme Harmony across all 10 ERP modules */
+html.dark body {
+  background-color: #070b14;
+  color: #f1f5f9;
+}
+
+html.dark .bg-white {
+  background-color: #0f172a !important;
+  color: #f1f5f9;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/80 {
+  background-color: #162033 !important;
+}
+
+html.dark .bg-slate-100 {
+  background-color: #1e293b !important;
+}
+
+html.dark .bg-slate-200 {
+  background-color: #334155 !important;
+}
+
+html.dark .border-slate-200,
+html.dark .border-slate-100 {
+  border-color: #24324a !important;
+}
+
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+html.dark .text-slate-900,
+html.dark .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html.dark .text-annavya-navy {
+  color: #f8f3e6 !important;
+}
+
+html.dark .text-annavya-royal {
+  color: #60a5fa !important;
+}
+
+html.dark .bg-annavya-ice,
+html.dark .bg-annavya-ice\/60,
+html.dark .bg-annavya-ice\/40 {
+  background-color: rgba(18, 70, 168, 0.25) !important;
+}
+
+/* Jewel-toned dark-mode status surfaces & badges */
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-50\/50,
+html.dark .bg-emerald-50\/70 {
+  background-color: rgba(16, 185, 129, 0.14) !important;
+}
+html.dark .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.22) !important;
+}
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-emerald-900 {
+  color: #6ee7b7 !important;
+}
+html.dark .border-emerald-200 {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-50\/70 {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+}
+html.dark .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.22) !important;
+}
+html.dark .text-amber-700,
+html.dark .text-amber-800,
+html.dark .text-amber-900 {
+  color: #fcd34d !important;
+}
+html.dark .border-amber-200,
+html.dark .border-amber-300 {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-50\/60 {
+  background-color: rgba(244, 63, 94, 0.14) !important;
+}
+html.dark .bg-rose-100 {
+  background-color: rgba(244, 63, 94, 0.22) !important;
+}
+html.dark .text-rose-600,
+html.dark .text-rose-700,
+html.dark .text-rose-800 {
+  color: #fda4af !important;
+}
+html.dark .border-rose-200,
+html.dark .border-rose-300 {
+  border-color: rgba(244, 63, 94, 0.35) !important;
+}
+
+html.dark .bg-sky-50 {
+  background-color: rgba(56, 189, 248, 0.14) !important;
+}
+html.dark .text-sky-700,
+html.dark .text-sky-900 {
+  color: #7dd3fc !important;
+}
+html.dark .border-sky-300 {
+  border-color: rgba(56, 189, 248, 0.35) !important;
+}
+
+/* Recharts dark-mode legibility */
+html.dark .recharts-cartesian-axis-tick-value {
+  fill: #94a3b8 !important;
+}
+html.dark .recharts-default-tooltip {
+  background-color: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+  border-radius: 0.75rem;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #0b1220 !important;
+  color: #f1f5f9 !important;
+  border-color: #2d3f5e !important;
+}
+
+html.dark .thermal-paper {
+  background: repeating-linear-gradient(
+    0deg,
+    #fffef7 0px,
+    #fffef7 24px,
+    #fcfaf0 25px
+  ) !important;
+  color: #0f172a !important;
+}
+
+html.dark .thermal-paper .text-slate-900,
+html.dark .thermal-paper .text-slate-800,
+html.dark .thermal-paper .text-slate-600 {
+  color: #0f172a !important;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}

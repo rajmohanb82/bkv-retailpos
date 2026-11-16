@@ -1,0 +1,228 @@
+services:
+  annavya-db:
+    image: postgres:16-alpine
+    container_name: annavya-db
+    environment:
+      POSTGRES_DB: annavya_erp
+      POSTGRES_USER: annavya
+      POSTGRES_PASSWORD: annavya_secret
+    ports:
+      - "5460:5432"
+    volumes:
+      - annavya_pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U annavya -d annavya_erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - annavya-net
+
+  admin-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: admin-service
+    container_name: annavya-admin-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/admin-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  vendor-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: vendor-service
+    container_name: annavya-vendor-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/vendor-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  stores-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: stores-service
+    container_name: annavya-stores-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/stores-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  factory-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: factory-service
+    container_name: annavya-factory-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/factory-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  oms-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: oms-service
+    container_name: annavya-oms-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/oms-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  pos-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: pos-service
+    container_name: annavya-pos-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  kot-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: kot-service
+    container_name: annavya-kot-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  analytics-service:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+      args:
+        SERVICE_DIR: analytics-service
+    container_name: annavya-analytics-service
+    environment:
+      DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/analytics-service/app:/app/app
+    depends_on:
+      annavya-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - annavya-net
+
+  annavya-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: annavya-frontend
+    networks:
+      - annavya-net
+
+  annavya-gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: annavya-gateway
+    ports:
+      - "8285:80"
+    depends_on:
+      - admin-service
+      - vendor-service
+      - stores-service
+      - factory-service
+      - oms-service
+      - pos-service
+      - kot-service
+      - analytics-service
+      - annavya-frontend
+    networks:
+      - annavya-net
+
+volumes:
+  annavya_pgdata:
+
+networks:
+  annavya-net:
+    driver: bridge
+
