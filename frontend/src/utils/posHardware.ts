@@ -1,4 +1,5 @@
 import { apiFetch } from "../api";
+import { generateBarcodeSvgHtml } from "../components/BarcodeSvg";
 
 export const FAMOUS_PRINTER_DRIVERS = [
   "Epson TM-T82III (ESC/POS 58mm)",
@@ -130,15 +131,29 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
   const isPaid =
     order?.status === "PAID_PENDING_DELIVERY" || order?.status === "DELIVERED_CLOSED";
   const docId = isPaid ? order?.invoice_no : order?.estimate_no;
+  const last4 = String(docId || "").slice(-4);
+  const tradeName = outlet?.trade_name || "Bikanervala Heritage Sweets";
+  const address = outlet?.address || "Connaught Place, New Delhi - 110001";
   const lines: string[] = [
     "========================================",
-    `     ${(outlet?.trade_name || "ANNAVYA HERITAGE SWEETS").slice(0, 30)}`,
-    `     ${(outlet?.city || "New Delhi").slice(0, 30)} | Out: ${order?.outlet_code || "DEL01"}`,
-    isPaid ? "            ** TAX INVOICE **" : "       ** ESTIMATE SLIP (UNPAID) **",
-    `GSTIN: ${outlet?.gstin || "07AAACA5678A1ZY"}`,
+    "              BIKANERVALA               ",
+    "   SWEETS • RESTAURANT • CHAAT • NAMKEEN",
+    "----------------------------------------",
+    padLeft(padRight(tradeName.slice(0, 38), 38), 39),
+    padLeft(padRight(address.slice(0, 38), 38), 39),
+    `GSTIN: ${outlet?.gstin || "07AAACB1234F1Z5"}`,
+    `FSSAI: ${outlet?.fssai_no || "13324001000451"}`,
+    "----------------------------------------",
+    isPaid ? "           *** TAX INVOICE ***          " : "     *** ESTIMATE SLIP (NOT A BILL) *** ",
     "----------------------------------------",
     `${isPaid ? "INV" : "EST"}: ${docId}`,
-    `DT : ${new Date().toLocaleString("en-IN")}`,
+    `Token Last-4: #${last4} | Out: ${order?.outlet_code || "DEL01"}`,
+    `Date: ${new Date().toLocaleString("en-IN")}`,
+    ...(order?.customer_name || order?.customer_mobile
+      ? [
+          `Cust: ${(order.customer_name || "Walk-in").slice(0, 24)} | Mob: ${(order.customer_mobile || "").slice(0, 10)}`,
+        ]
+      : []),
     "----------------------------------------",
     "ITEM               QTY/WT        AMOUNT ",
     "----------------------------------------",
@@ -174,12 +189,19 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
     }
     lines.push("----------------------------------------");
   }
+  lines.push("          || | |||| | ||| | ||||| | |||         ");
+  lines.push(`               * ${docId} *            `);
+  lines.push("----------------------------------------");
   lines.push(
     isPaid
-      ? "  Scan / Enter Last 4 Digits at Delivery"
-      : "  Present at Cash Counter for Payment"
+      ? " Scan Barcode at Delivery for Handover  "
+      : " Present Barcode at Cash Counter to Pay "
   );
-  lines.push("       Thank You! Visit Annavya Again\n\n\n");
+  lines.push("----------------------------------------");
+  lines.push("  Taste of Tradition • Fresh Thinking   ");
+  lines.push("   Thank you for visiting Bikanervala!  ");
+  lines.push(" Powered by Annavya ERP (Software Dev)  ");
+  lines.push("========================================\n\n\n");
 
   const enc = new TextEncoder();
   const init = new Uint8Array([0x1b, 0x40]);
@@ -224,6 +246,7 @@ export async function print40ColumnThermalSlip(
       order.status === "PAID_PENDING_DELIVERY" || order.status === "DELIVERED_CLOSED";
     const docId = isPaid ? order.invoice_no : order.estimate_no;
     const last4 = String(docId || "").slice(-4);
+    const barcodeSvgHtml = generateBarcodeSvgHtml(docId, 48, true);
     const itemsHtml = (order.items || [])
       .map(
         (it: any) => `
@@ -248,27 +271,33 @@ export async function print40ColumnThermalSlip(
 <title>40-Col Slip - ${docId}</title>
 <style>
   @page { size: 58mm auto; margin: 2mm; }
-  body { font-family: "Courier New", Courier, monospace; font-size: 11px; width: 40ch; margin: 0 auto; color: #000; }
+  body { font-family: "Courier New", Courier, monospace; font-size: 11px; width: 42ch; margin: 0 auto; color: #000; background: #fff; }
   .center { text-align: center; }
   .bold { font-weight: 700; }
   .line { border-top: 1px dashed #000; margin: 5px 0; }
   table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
   .row { display: flex; justify-content: space-between; margin: 2px 0; }
+  img.bkv-logo { width: 46px; height: 46px; object-fit: contain; margin: 0 auto 3px auto; display: block; }
 </style>
 </head>
 <body>
-  <div class="center bold" style="font-size:13px;">${outlet?.trade_name || "ANNAVYA HERITAGE SWEETS"}</div>
-  <div class="center" style="font-size:10px;">${outlet?.legal_name || "Annavya Foods Retail Pvt Ltd"}</div>
-  <div class="center" style="font-size:10px;">${outlet?.address || "New Delhi"}</div>
+  <div class="center">
+    <img class="bkv-logo" src="/bikanervala-customer-logo.png" alt="Bikanervala" />
+  </div>
+  <div class="center bold" style="font-size:14px;letter-spacing:1px;color:#000;">BIKANERVALA</div>
+  <div class="center bold" style="font-size:9.5px;color:#222;margin-bottom:2px;">SWEETS • RESTAURANT • CHAAT • NAMKEEN</div>
+  <div class="center bold" style="font-size:10px;">${outlet?.trade_name || "Bikanervala Heritage Sweets"}</div>
+  <div class="center" style="font-size:9.5px;color:#333;">${outlet?.legal_name || "Bikanervala Foods Pvt. Ltd."}</div>
+  <div class="center" style="font-size:9px;color:#333;">${outlet?.address || "Block B-14, Inner Circle, Connaught Place, New Delhi - 110001"}</div>
+  <div class="center bold" style="font-size:9.5px;margin-top:2px;">GSTIN: ${outlet?.gstin || "07AAACB1234F1Z5"}</div>
+  <div class="center bold" style="font-size:9.5px;">FSSAI Lic No: ${outlet?.fssai_no || "13324001000451"}</div>
   ${
     isPaid
-      ? `<div class="center" style="font-size:10px;">GSTIN: ${outlet?.gstin || "07AAACA5678A1ZY"}</div>
-         <div class="center" style="font-size:10px;">FSSAI: ${outlet?.fssai_no || "13324001000451"}</div>
-         <div class="center bold" style="margin-top:4px;border:1px solid #000;padding:2px;">TAX INVOICE (40-COL)</div>`
-      : `<div class="center bold" style="margin-top:4px;border:1px solid #000;padding:2px;">ESTIMATE SLIP - NOT A BILL</div>`
+      ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;background:#000;color:#fff;padding:2px 8px;display:inline-block;font-size:11px;">TAX INVOICE</div>`
+      : `<div class="center bold" style="margin:4px auto;border:1.5px dashed #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** ESTIMATE SLIP - NOT A BILL ***</div>`
   }
   <div class="line"></div>
-  <div class="row"><span>${isPaid ? "INV" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code}</span></div>
+  <div class="row"><span>${isPaid ? "INV" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code || "DEL01"}</span></div>
   <div class="row"><span>Token Last-4: <b>#${last4}</b></span><span>${new Date().toLocaleTimeString("en-IN")}</span></div>
   ${
     order.customer_name || order.customer_mobile
@@ -276,7 +305,6 @@ export async function print40ColumnThermalSlip(
          ${order.customer_mobile ? `<div class="row"><span>Mobile:</span><span><b>${order.customer_mobile}</b></span></div>` : ""}`
       : ""
   }
-  <div style="font-size:10px;">Driver: ${driverName}</div>
   <div class="line"></div>
   <table>
     <thead>
@@ -299,10 +327,23 @@ export async function print40ColumnThermalSlip(
   <div class="line"></div>
   <div class="row bold" style="font-size:13px;"><span>GRAND TOTAL</span><span>Rs.${Number(order.grand_total || 0).toFixed(2)}</span></div>
   ${isPaid && splitsHtml ? `<div class="line"></div><div class="bold" style="font-size:10px;">TENDER SPLITS:</div>${splitsHtml}` : ""}
+  
+  <!-- CRISP SCANNABLE BARCODE -->
   <div class="line"></div>
-  <div class="center bold" style="font-size:12px;letter-spacing:1px;">* ${docId} *</div>
-  <div class="center" style="font-size:9.5px;margin-top:3px;">
-    ${isPaid ? "Scan or Enter Last 4 Digits (#" + last4 + ") at Delivery" : "Present Last 4 Digits (#" + last4 + ") at Cash Counter"}
+  <div class="center" style="margin:6px 0 2px 0;">
+    ${barcodeSvgHtml}
+  </div>
+  <div class="center bold" style="font-size:9.5px;margin-top:2px;">
+    ${isPaid ? "Scan Barcode at Delivery Counter for Handover" : "Present Barcode at Cash Counter for Billing & Payment"}
+  </div>
+
+  <!-- FOOTER -->
+  <div class="line"></div>
+  <div class="center bold" style="font-size:10px;margin-top:3px;">Taste of Tradition • Fresh Thinking</div>
+  <div class="center" style="font-size:9px;margin-top:1px;">Thank you for visiting Bikanervala!</div>
+  <div class="center" style="font-size:8px;color:#555;margin-top:4px;border-top:1px dotted #888;padding-top:3px;">
+    Powered by Annavya Retail ERP<br />
+    (Software Development by Annavya • www.annavya.in)
   </div>
 </body>
 </html>`;

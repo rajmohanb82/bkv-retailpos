@@ -1221,8 +1221,17 @@ export const PortraitKioskExpress: React.FC<PortraitKioskExpressProps> = ({
             </div>
 
             {/* Barcode Simulation */}
-            <div className="pt-2 flex justify-center">
-              <BarcodeSvg value={confirmedOrderResult.order?.order_no || "K-108"} height={45} />
+            <div className="pt-2 flex flex-col items-center justify-center">
+              <BarcodeSvg
+                value={
+                  confirmedOrderResult.order?.invoice_no ||
+                  confirmedOrderResult.order?.estimate_no ||
+                  confirmedOrderResult.order?.order_no ||
+                  "K-108"
+                }
+                height={48}
+                showText={true}
+              />
             </div>
           </div>
 

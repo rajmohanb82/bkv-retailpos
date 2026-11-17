@@ -705,14 +705,15 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
             </div>
 
             {/* Printed Barcode */}
-            <div className="p-4 bg-slate-50 dark:bg-[#0B1324] rounded-2xl border border-slate-200 dark:border-slate-800">
+            <div className="p-4 bg-slate-50 dark:bg-[#0B1324] rounded-2xl border border-slate-200 dark:border-slate-800 text-center">
               <BarcodeSvg
                 value={confirmedOrderResult.invoice_no || confirmedOrderResult.estimate_no}
-                height={40}
+                height={48}
+                showText={true}
               />
-              <span className="text-[10px] font-mono text-slate-500 mt-1 block">
-                {confirmedOrderResult.invoice_no || confirmedOrderResult.estimate_no}
-              </span>
+              <div className="text-[10px] text-slate-500 mt-1 font-semibold">
+                Scan Barcode at Cash Counter or Counter Handover
+              </div>
             </div>
 
             {/* Action Buttons */}

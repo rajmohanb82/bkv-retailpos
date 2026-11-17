@@ -54,34 +54,41 @@ export const ThermalSlip: React.FC<ThermalSlipProps> = ({ order, outlet }) => {
       <div className="thermal-paper border border-dashed border-slate-300 rounded-xl p-4 font-mono text-[11px] leading-relaxed text-slate-900 max-w-[310px] mx-auto shadow-inner">
         <div className="text-center border-b border-dashed border-slate-400 pb-2 mb-2">
           <img
-            src="/annavya-badge-light.png"
-            alt="Annavya"
-            className="w-10 h-10 mx-auto mb-1 object-contain grayscale contrast-125"
+            src="/bikanervala-customer-logo.png"
+            alt="Bikanervala"
+            className="w-12 h-12 mx-auto mb-1 object-contain"
+            onError={(e) => {
+              e.currentTarget.src = "/bikanervala-customer-logo.svg";
+            }}
           />
-          <div className="font-bold text-sm tracking-wide">
-            {outlet?.trade_name || "ANNAVYA HERITAGE SWEETS"}
+          <div className="font-extrabold text-sm tracking-wide text-slate-900">
+            BIKANERVALA
           </div>
-          <div className="text-[10px] text-slate-600">
-            {outlet?.legal_name || "Annavya Foods Retail Pvt Ltd"}
+          <div className="text-[10px] font-bold text-slate-700">
+            SWEETS • RESTAURANT • CHAAT • NAMKEEN
           </div>
-          <div className="text-[10px] text-slate-600">
-            {outlet?.address || "Connaught Place, New Delhi"}
+          <div className="text-[10px] font-semibold text-slate-800">
+            {outlet?.trade_name || "Bikanervala Heritage Sweets"}
+          </div>
+          <div className="text-[9.5px] text-slate-600">
+            {outlet?.legal_name || "Bikanervala Foods Pvt. Ltd."}
+          </div>
+          <div className="text-[9px] text-slate-600">
+            {outlet?.address || "Block B-14, Inner Circle, Connaught Place, New Delhi - 110001"}
+          </div>
+          <div className="text-[9.5px] font-bold text-slate-800 mt-1">
+            GSTIN: {outlet?.gstin || "07AAACB1234F1Z5"}
+          </div>
+          <div className="text-[9px] font-semibold text-slate-700">
+            FSSAI Lic No: {outlet?.fssai_no || "13324001000451"}
           </div>
           {isPaid ? (
-            <>
-              <div className="text-[10px] mt-0.5">
-                GSTIN: {outlet?.gstin || "07AAACA5678A1ZY"}
-              </div>
-              <div className="text-[10px]">
-                FSSAI: {outlet?.fssai_no || "13324001000451"}
-              </div>
-              <div className="mt-1 font-bold bg-slate-900 text-white py-0.5 px-2 inline-block text-[10px]">
-                TAX INVOICE
-              </div>
-            </>
+            <div className="mt-1 font-bold bg-slate-900 text-white py-0.5 px-3 inline-block text-[10px]">
+              TAX INVOICE
+            </div>
           ) : (
-            <div className="mt-1 font-bold border border-slate-800 py-0.5 px-2 inline-block text-[10px]">
-              *** ESTIMATE ONLY - NOT A BILL ***
+            <div className="mt-1 font-bold border border-dashed border-slate-800 py-0.5 px-2 inline-block text-[10px]">
+              *** ESTIMATE ONLY - NOT A TAX INVOICE ***
             </div>
           )}
         </div>
@@ -162,12 +169,20 @@ export const ThermalSlip: React.FC<ThermalSlipProps> = ({ order, outlet }) => {
         )}
 
         <div className="mt-3 pt-2 border-t border-dashed border-slate-400">
-          <BarcodeSvg value={barcode} height={38} />
+          <BarcodeSvg value={barcode} height={46} showText={true} />
         </div>
-        <div className="text-center text-[9px] text-slate-500 mt-1">
+        <div className="text-center text-[9px] font-semibold text-slate-700 mt-1">
           {isPaid
-            ? "Scan at Delivery Counter for Handover"
-            : "Valid Today Only • Present at Cash Counter"}
+            ? "Scan Barcode at Delivery Counter for Handover"
+            : "Valid Today Only • Present Barcode at Cash Counter to Pay"}
+        </div>
+        <div className="border-t border-dotted border-slate-300 mt-3 pt-2 text-center text-[8.5px] text-slate-500 space-y-0.5">
+          <div className="font-bold text-slate-700">Taste of Tradition • Fresh Thinking</div>
+          <div>Thank you for visiting Bikanervala!</div>
+          <div className="text-[8px] text-slate-400 pt-0.5">
+            Powered by Annavya Retail ERP<br />
+            (Software Development by Annavya • www.annavya.in)
+          </div>
         </div>
       </div>
     </div>

@@ -1,0 +1,17 @@
+# Node dependencies
+node_modules/
+frontend/node_modules/
+
+# Production build outputs
+dist/
+frontend/dist/
+
+# Python caches
+__pycache__/
+*.pyc
+services/*/__pycache__/
+render/__pycache__/
+
+# Local environment
+.env
+*.log

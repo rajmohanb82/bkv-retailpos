@@ -133,6 +133,56 @@ def apply_schema_migrations(cur):
     except Exception as e:
         print(f"[Render DB Bootstrap] Role permissions update warning: {e}")
 
+    # Ensure system_config has full default aggregator_config (Zomato & Swiggy)
+    try:
+        cur.execute("""
+            INSERT INTO admin_mod.system_config (config_key, config_value)
+            VALUES (
+                'aggregator_config',
+                '{"zomato":{"enabled":true,"merchant_id":"ZOM_RET_9921","api_key":"zm_live_771928374921","webhook_secret":"whsec_zom_98124971a8f","auto_accept":false,"default_prep_time_mins":20},"swiggy":{"enabled":true,"restaurant_id":"SWG_REST_4412","partner_token":"swg_live_883019284719","webhook_secret":"whsec_swg_44129841b9c","auto_accept":false,"default_prep_time_mins":15},"rider_buffer_mins":5,"sound_alerts_enabled":true,"auto_mark_food_ready":true}'::jsonb
+            )
+            ON CONFLICT (config_key) DO NOTHING;
+        """)
+        print("[Render DB Bootstrap] Ensured default aggregator_config in system_config.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] System config aggregator warning: {e}")
+
+    # Update outlets to ensure Bikanervala trade names, legal names, GSTIN, and FSSAI are applied
+    try:
+        cur.execute("""
+            UPDATE admin_mod.outlets
+            SET trade_name = 'Bikanervala Heritage Sweets',
+                legal_name = 'Bikanervala Foods Pvt. Ltd.',
+                gstin = '07AAACB1234F1Z5',
+                fssai_no = '13324001000451',
+                address = 'Block B-14, Inner Circle, Connaught Place'
+            WHERE code = 'DEL01';
+
+            UPDATE admin_mod.outlets
+            SET trade_name = 'Bikanervala Sweets & Restaurant',
+                legal_name = 'Bikanervala Foods Pvt. Ltd.',
+                gstin = '06AAACB1234F1Z3',
+                fssai_no = '10824002000812'
+            WHERE code = 'GUR02';
+
+            UPDATE admin_mod.outlets
+            SET trade_name = 'Bikanervala Jaipur',
+                legal_name = 'Rajputana Hospitality Ventures LLP',
+                gstin = '08AAACB1234F1Z1',
+                fssai_no = '12224003000199'
+            WHERE code = 'JAI03';
+
+            UPDATE admin_mod.outlets
+            SET trade_name = 'Bikanervala Bistro & Sweets',
+                legal_name = 'Bikanervala Directors Hospitality Pvt Ltd',
+                gstin = '09AAACB1234F1Z8',
+                fssai_no = '12724004000511'
+            WHERE code = 'NOI04';
+        """)
+        print("[Render DB Bootstrap] Outlets updated with Bikanervala brand info, GSTIN, and FSSAI.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Outlets update warning: {e}")
+
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
 
 def import_datasource_if_needed(cur):

@@ -993,14 +993,43 @@ def simulate_incoming_order(
 
 @app.get("/aggregators/config")
 def get_aggregator_config():
+    defaults = {
+        "zomato": {
+            "enabled": True,
+            "merchant_id": "ZOM_RET_9921",
+            "api_key": "zm_live_771928374921",
+            "webhook_secret": "whsec_zom_98124971a8f",
+            "auto_accept": False,
+            "default_prep_time_mins": 20,
+        },
+        "swiggy": {
+            "enabled": True,
+            "restaurant_id": "SWG_REST_4412",
+            "partner_token": "swg_live_883019284719",
+            "webhook_secret": "whsec_swg_44129841b9c",
+            "auto_accept": False,
+            "default_prep_time_mins": 15,
+        },
+        "rider_buffer_mins": 5,
+        "sound_alerts_enabled": True,
+        "auto_mark_food_ready": True,
+    }
     with get_conn() as conn:
         row = conn.execute("SELECT config_value FROM admin_mod.system_config WHERE config_key = 'aggregator_config'").fetchone()
         if not row:
-            return {
-                "zomato": {"enabled": True, "merchant_id": "ZOM_9921", "auto_accept": False, "default_prep_time_mins": 20},
-                "swiggy": {"enabled": True, "restaurant_id": "SWG_4412", "auto_accept": False, "default_prep_time_mins": 15}
-            }
-        return row["config_value"]
+            return defaults
+        cfg = row["config_value"] if isinstance(row["config_value"], dict) else json.loads(row["config_value"])
+        result = dict(defaults)
+        result.update(cfg)
+        if "zomato" in cfg and isinstance(cfg["zomato"], dict):
+            z = dict(defaults["zomato"])
+            z.update(cfg["zomato"])
+            result["zomato"] = z
+        if "swiggy" in cfg and isinstance(cfg["swiggy"], dict):
+            s = dict(defaults["swiggy"])
+            s.update(cfg["swiggy"])
+            result["swiggy"] = s
+        return result
 
 
 @app.put("/aggregators/config")

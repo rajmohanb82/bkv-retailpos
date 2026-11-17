@@ -43,10 +43,19 @@ import {
   QrCode,
   FileCheck2,
   ShoppingBag,
+  Copy,
+  ShieldCheck,
+  Key,
+  Zap,
+  Wifi,
+  Globe,
+  Sliders,
+  Bell,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { AggregatorOrder } from "../types";
 import { audioAlert } from "../utils/audioAlert";
+import { BarcodeSvg } from "../components/BarcodeSvg";
 
 interface OmsModuleProps {
   activeOutlet?: string;
@@ -168,9 +177,28 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
 
   // Aggregator Config State
   const [aggConfig, setAggConfig] = useState<any>({
-    zomato: { enabled: true, merchant_id: "ZOM_RET_9921", api_key: "zm_live_771928374921", auto_accept: false, default_prep_time_mins: 20 },
-    swiggy: { enabled: true, restaurant_id: "SWG_REST_4412", partner_token: "swg_live_883019284719", auto_accept: false, default_prep_time_mins: 15 },
+    zomato: {
+      enabled: true,
+      merchant_id: "ZOM_RET_9921",
+      api_key: "zm_live_771928374921",
+      webhook_secret: "whsec_zom_98124971a8f",
+      auto_accept: false,
+      default_prep_time_mins: 20,
+    },
+    swiggy: {
+      enabled: true,
+      restaurant_id: "SWG_REST_4412",
+      partner_token: "swg_live_883019284719",
+      webhook_secret: "whsec_swg_44129841b9c",
+      auto_accept: false,
+      default_prep_time_mins: 15,
+    },
+    rider_buffer_mins: 5,
+    sound_alerts_enabled: true,
+    auto_mark_food_ready: true,
   });
+  const [copiedWebhook, setCopiedWebhook] = useState<string | null>(null);
+  const [showApiKeys, setShowApiKeys] = useState<{ zomato: boolean; swiggy: boolean }>({ zomato: false, swiggy: false });
 
   const notify = (ok: boolean, msg: string) => {
     setToast({ ok, msg });
@@ -217,7 +245,14 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
   const loadAggConfig = async () => {
     try {
       const res = await apiFetch<any>("/api/oms/aggregators/config");
-      if (res) setAggConfig(res);
+      if (res) {
+        setAggConfig((prev: any) => ({
+          ...prev,
+          ...res,
+          zomato: { ...prev.zomato, ...(res.zomato || {}) },
+          swiggy: { ...prev.swiggy, ...(res.swiggy || {}) },
+        }));
+      }
     } catch (e: any) {
       console.error(e);
     }
@@ -1758,44 +1793,524 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
           TAB 3: AGGREGATOR API & WEBHOOK CONFIGURATION
       ======================================================== */}
       {tab === "config" && (
-        <form onSubmit={handleSaveAggConfig} className="max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5 text-xs">
-          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-            <h3 className="text-base font-extrabold text-[#081F5C] dark:text-white flex items-center gap-2">
-              <Settings className="w-5 h-5 text-blue-600" />
-              Zomato & Swiggy Production Integration Settings
-            </h3>
-            <p className="text-slate-500 mt-1">
-              Configure live Merchant Partner API keys, webhook endpoints, and automatic SLA buffer thresholds.
-            </p>
-          </div>
+        <form onSubmit={handleSaveAggConfig} className="max-w-5xl mx-auto space-y-6 text-xs pb-12 animate-fade-in">
+          {/* Header Panel */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-[#081F5C] dark:text-white">
+                    Zomato & Swiggy Production Integration Settings
+                  </h3>
+                  <p className="text-slate-500 mt-0.5 text-[11px]">
+                    Manage live Merchant Partner credentials, inbound webhook routes, and kitchen SLA automation.
+                  </p>
+                </div>
+              </div>
+            </div>
 
-          {/* Zomato Configuration Section */}
-          <div className="p-4 rounded-2xl bg-red-50/50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 space-y-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-red-700 dark:text-red-400 flex items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-red-600 text-white font-black text-[10px]">ZOMATO</span>
-                Zomato Merchant Partner API
-              </h4>
-              <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={aggConfig.zomato?.enabled}
-                  onChange={(e) =>
-                    setAggConfig({ ...aggConfig, zomato: { ...aggConfig.zomato, enabled: e.target.checked } })
-                  }
-                  className="rounded text-red-600 w-4 h-4"
-                />
-                <span>Active</span>
-              </label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-slate-700 dark:text-slate-300 text-[11px]">
+                <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Gateway: <b className="text-emerald-600">Online</b></span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSimulateLiveOrder("ZOMATO")}
+                className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 font-bold flex items-center gap-1 text-[11px] transition border border-red-200 dark:border-red-900"
+              >
+                <Zap className="w-3 h-3 text-red-600" />
+                <span>Test Zomato Order</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSimulateLiveOrder("SWIGGY")}
+                className="px-3 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300 font-bold flex items-center gap-1 text-[11px] transition border border-orange-200 dark:border-orange-900"
+              >
+                <Zap className="w-3 h-3 text-orange-600" />
+                <span>Test Swiggy Order</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
+          {/* Aggregators 2-Column Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* 1. ZOMATO MERCHANT INTEGRATION CARD */}
+            <div className="bg-white dark:bg-slate-900 border border-red-200 dark:border-red-900/60 rounded-3xl p-6 shadow-sm space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between pb-3 border-b border-red-100 dark:border-red-950">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-xl bg-[#E23744] text-white font-black text-xs tracking-wider shadow-sm">
+                    ZOMATO
+                  </span>
+                  <div>
+                    <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                      Zomato Merchant Partner API
+                    </h4>
+                    <span className="text-[10px] text-red-600 dark:text-red-400 font-semibold">
+                      v2.4 Live Webhook Relay
+                    </span>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300 bg-red-50 dark:bg-red-950/40 px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-900">
+                  <input
+                    type="checkbox"
+                    checked={aggConfig.zomato?.enabled}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        zomato: { ...aggConfig.zomato, enabled: e.target.checked },
+                      })
+                    }
+                    className="rounded text-red-600 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Active</span>
+                </label>
+              </div>
+
+              {/* Inputs */}
+              <div className="space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Merchant Store ID
+                    </label>
+                    <input
+                      type="text"
+                      value={aggConfig.zomato?.merchant_id || ""}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          zomato: { ...aggConfig.zomato, merchant_id: e.target.value },
+                        })
+                      }
+                      placeholder="e.g. ZOM_RET_9921"
+                      className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Default Prep Time (mins)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={60}
+                      value={aggConfig.zomato?.default_prep_time_mins || 20}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          zomato: { ...aggConfig.zomato, default_prep_time_mins: Number(e.target.value) },
+                        })
+                      }
+                      className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-center text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-red-600" />
+                      Partner API Key
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeys({ ...showApiKeys, zomato: !showApiKeys.zomato })}
+                      className="text-[10px] text-red-600 hover:underline font-bold"
+                    >
+                      {showApiKeys.zomato ? "Hide Key" : "Reveal Key"}
+                    </button>
+                  </div>
+                  <input
+                    type={showApiKeys.zomato ? "text" : "password"}
+                    value={aggConfig.zomato?.api_key || ""}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        zomato: { ...aggConfig.zomato, api_key: e.target.value },
+                      })
+                    }
+                    placeholder="zm_live_..."
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Webhook Signing Secret
+                  </label>
+                  <input
+                    type="password"
+                    value={aggConfig.zomato?.webhook_secret || ""}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        zomato: { ...aggConfig.zomato, webhook_secret: e.target.value },
+                      })
+                    }
+                    placeholder="whsec_zom_..."
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aggConfig.zomato?.auto_accept}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          zomato: { ...aggConfig.zomato, auto_accept: e.target.checked },
+                        })
+                      }
+                      className="rounded text-red-600 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      Auto-accept incoming orders if all items are in stock
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 ml-6 mt-0.5">
+                    Automatically approves new orders directly into KOT kitchen stations without requiring manual kitchen captain confirmation.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 text-[11px] flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-blue-500" />
+                      Inbound Webhook URL (Zomato Partner Portal)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = `${typeof window !== "undefined" ? window.location.origin : "https://bkv-retailpos.onrender.com"}/api/oms/aggregators/zomato/webhook`;
+                        navigator.clipboard?.writeText(url);
+                        setCopiedWebhook("zomato");
+                        notify(true, "Zomato Webhook URL copied to clipboard!");
+                        setTimeout(() => setCopiedWebhook(null), 2500);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1 hover:bg-slate-100 transition text-[10px]"
+                    >
+                      {copiedWebhook === "zomato" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-600">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy URL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-600 dark:text-slate-400 select-all overflow-x-auto">
+                    {typeof window !== "undefined" ? window.location.origin : "https://bkv-retailpos.onrender.com"}/api/oms/aggregators/zomato/webhook
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. SWIGGY URBANPIPER INTEGRATION CARD */}
+            <div className="bg-white dark:bg-slate-900 border border-orange-200 dark:border-orange-900/60 rounded-3xl p-6 shadow-sm space-y-4 relative overflow-hidden">
+              <div className="flex items-center justify-between pb-3 border-b border-orange-100 dark:border-orange-950">
+                <div className="flex items-center gap-2.5">
+                  <span className="px-2.5 py-1 rounded-xl bg-[#FC8019] text-white font-black text-xs tracking-wider shadow-sm">
+                    SWIGGY
+                  </span>
+                  <div>
+                    <h4 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                      Swiggy UrbanPiper / Direct Partner API
+                    </h4>
+                    <span className="text-[10px] text-orange-600 dark:text-orange-400 font-semibold">
+                      UrbanPiper Relay v3 Protocol
+                    </span>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300 bg-orange-50 dark:bg-orange-950/40 px-3 py-1.5 rounded-xl border border-orange-200 dark:border-orange-900">
+                  <input
+                    type="checkbox"
+                    checked={aggConfig.swiggy?.enabled}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        swiggy: { ...aggConfig.swiggy, enabled: e.target.checked },
+                      })
+                    }
+                    className="rounded text-orange-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Active</span>
+                </label>
+              </div>
+
+              {/* Inputs */}
+              <div className="space-y-3.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Restaurant ID
+                    </label>
+                    <input
+                      type="text"
+                      value={aggConfig.swiggy?.restaurant_id || ""}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          swiggy: { ...aggConfig.swiggy, restaurant_id: e.target.value },
+                        })
+                      }
+                      placeholder="e.g. SWG_REST_4412"
+                      className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Default Prep Time (mins)
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={60}
+                      value={aggConfig.swiggy?.default_prep_time_mins || 15}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          swiggy: { ...aggConfig.swiggy, default_prep_time_mins: Number(e.target.value) },
+                        })
+                      }
+                      className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-center text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-orange-500" />
+                      Partner Token / Secret
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeys({ ...showApiKeys, swiggy: !showApiKeys.swiggy })}
+                      className="text-[10px] text-orange-600 hover:underline font-bold"
+                    >
+                      {showApiKeys.swiggy ? "Hide Key" : "Reveal Key"}
+                    </button>
+                  </div>
+                  <input
+                    type={showApiKeys.swiggy ? "text" : "password"}
+                    value={aggConfig.swiggy?.partner_token || ""}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        swiggy: { ...aggConfig.swiggy, partner_token: e.target.value },
+                      })
+                    }
+                    placeholder="swg_live_..."
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Webhook Signing Secret
+                  </label>
+                  <input
+                    type="password"
+                    value={aggConfig.swiggy?.webhook_secret || ""}
+                    onChange={(e) =>
+                      setAggConfig({
+                        ...aggConfig,
+                        swiggy: { ...aggConfig.swiggy, webhook_secret: e.target.value },
+                      })
+                    }
+                    placeholder="whsec_swg_..."
+                    className="w-full border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white font-medium"
+                  />
+                </div>
+
+                <div className="pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={aggConfig.swiggy?.auto_accept}
+                      onChange={(e) =>
+                        setAggConfig({
+                          ...aggConfig,
+                          swiggy: { ...aggConfig.swiggy, auto_accept: e.target.checked },
+                        })
+                      }
+                      className="rounded text-orange-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      Auto-accept incoming orders if all items are in stock
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 ml-6 mt-0.5">
+                    Relays directly to kitchen display system without delaying courier dispatch SLAs.
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 text-[11px] flex items-center gap-1.5">
+                      <Globe className="w-3.5 h-3.5 text-orange-500" />
+                      Inbound Webhook URL (UrbanPiper Console)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = `${typeof window !== "undefined" ? window.location.origin : "https://bkv-retailpos.onrender.com"}/api/oms/aggregators/swiggy/webhook`;
+                        navigator.clipboard?.writeText(url);
+                        setCopiedWebhook("swiggy");
+                        notify(true, "Swiggy Webhook URL copied to clipboard!");
+                        setTimeout(() => setCopiedWebhook(null), 2500);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-bold flex items-center gap-1 hover:bg-slate-100 transition text-[10px]"
+                    >
+                      {copiedWebhook === "swiggy" ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          <span className="text-emerald-600">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy URL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-600 dark:text-slate-400 select-all overflow-x-auto">
+                    {typeof window !== "undefined" ? window.location.origin : "https://bkv-retailpos.onrender.com"}/api/oms/aggregators/swiggy/webhook
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3. SLA & Operational Guardrails Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+            <h4 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-indigo-600" />
+              SLA Buffer & Kitchen Automation Guardrails
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2">
+                <label className="font-bold text-slate-700 dark:text-slate-300 block">
+                  Rider Arrival Buffer (mins)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={aggConfig.rider_buffer_mins || 5}
+                  onChange={(e) =>
+                    setAggConfig({ ...aggConfig, rider_buffer_mins: Number(e.target.value) })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white dark:bg-slate-900 font-mono font-bold text-center"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Buffer time added to request rider pickup before food packaging completes.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Bell className="w-3.5 h-3.5 text-blue-500" />
+                    Audio & Visual Chime Alerts
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Play continuous audio chime and screen flash when a new Zomato/Swiggy order lands.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300 pt-2">
+                  <input
+                    type="checkbox"
+                    checked={aggConfig.sound_alerts_enabled}
+                    onChange={(e) =>
+                      setAggConfig({ ...aggConfig, sound_alerts_enabled: e.target.checked })
+                    }
+                    className="rounded text-blue-600 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Sound Alerts Active</span>
+                </label>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-2 flex flex-col justify-between">
+                <div>
+                  <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                    Auto-Mark 'Food Ready'
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Automatically trigger courier arrival alert when all KOT tickets are marked complete.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300 pt-2">
+                  <input
+                    type="checkbox"
+                    checked={aggConfig.auto_mark_food_ready}
+                    onChange={(e) =>
+                      setAggConfig({ ...aggConfig, auto_mark_food_ready: e.target.checked })
+                    }
+                    className="rounded text-emerald-600 w-4 h-4 cursor-pointer"
+                  />
+                  <span>Auto-Notify Courier</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar */}
+          <div className="flex items-center justify-between pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAggConfig({
+                  zomato: {
+                    enabled: true,
+                    merchant_id: "ZOM_RET_9921",
+                    api_key: "zm_live_771928374921",
+                    webhook_secret: "whsec_zom_98124971a8f",
+                    auto_accept: false,
+                    default_prep_time_mins: 20,
+                  },
+                  swiggy: {
+                    enabled: true,
+                    restaurant_id: "SWG_REST_4412",
+                    partner_token: "swg_live_883019284719",
+                    webhook_secret: "whsec_swg_44129841b9c",
+                    auto_accept: false,
+                    default_prep_time_mins: 15,
+                  },
+                  rider_buffer_mins: 5,
+                  sound_alerts_enabled: true,
+                  auto_mark_food_ready: true,
+                });
+                notify(true, "Restored default configuration settings. Click 'Save' to apply.");
+              }}
+              className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            >
+              Reset to Recommended Defaults
+            </button>
+
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-[#081F5C] text-white font-bold shadow-md hover:bg-blue-900 transition"
+              className="px-8 py-3 rounded-2xl bg-[#081F5C] hover:bg-blue-900 text-white font-extrabold shadow-lg hover:shadow-xl transition flex items-center gap-2 text-sm"
             >
-              Save Configuration
+              <Check className="w-4 h-4 text-emerald-400" />
+              Save Aggregator Integration Settings
             </button>
           </div>
         </form>
@@ -2117,9 +2632,12 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                 </tbody>
               </table>
 
-              {/* Financial Totals */}
-              <div className="flex justify-end pt-2 border-t">
-                <div className="w-64 space-y-1 text-xs">
+              {/* Financial Totals & Scannable Barcode */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-3 border-t gap-4">
+                <div className="flex items-center gap-3">
+                  <BarcodeSvg value={quotationOrder.order_no} height={44} showText={true} />
+                </div>
+                <div className="w-64 space-y-1 text-xs ml-auto">
                   <div className="flex justify-between">
                     <span>Subtotal:</span>
                     <span className="font-mono font-bold">₹{Number(quotationOrder.selling_total || 46500).toLocaleString("en-IN")}</span>
@@ -2135,6 +2653,12 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Document Footer */}
+              <div className="pt-2 border-t text-center text-[10px] text-slate-500 space-y-0.5">
+                <div className="font-bold text-slate-800">Taste of Tradition • Fresh Thinking</div>
+                <div>Computer generated estimate & quotation • Software Development by Annavya ERP (www.annavya.in)</div>
               </div>
             </div>
 
