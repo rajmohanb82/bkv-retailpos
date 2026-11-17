@@ -85,8 +85,11 @@ CREATE TABLE admin_mod.items (
     is_loose_weighed BOOLEAN DEFAULT FALSE,
     default_tare_grams NUMERIC(8,2) DEFAULT 0,
     kitchen_station VARCHAR(40),
-    image_url TEXT,
-    active BOOLEAN DEFAULT TRUE
+    active BOOLEAN DEFAULT TRUE,
+    item_type VARCHAR(40) DEFAULT 'Prepared Food',
+    package_components JSONB DEFAULT '[]'::jsonb,
+    is_custom_package BOOLEAN DEFAULT FALSE,
+    image_url TEXT
 );
 
 CREATE TABLE admin_mod.boms (

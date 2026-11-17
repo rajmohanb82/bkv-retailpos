@@ -158,12 +158,18 @@ def import_datasource_if_needed(cur):
 
     if sql_path:
         print(f"[Render DB Bootstrap] Importing 1,657 item catalog from {sql_path}...")
-        with open(sql_path, "r", encoding="utf-8") as f:
-            sql = f.read()
-        cur.execute(sql)
-        cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
-        new_count = cur.fetchone()[0]
-        print(f"[Render DB Bootstrap] Datasource imported successfully! Total items: {new_count}")
+        try:
+            with open(sql_path, "r", encoding="utf-8") as f:
+                sql = f.read()
+            cur.execute(sql)
+            cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
+            new_count = cur.fetchone()[0]
+            print(f"[Render DB Bootstrap] Datasource imported successfully! Total items: {new_count}")
+        except Exception as e:
+            print(f"[Render DB Bootstrap] Warning during SQL catalog import: {e}")
+            cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
+            current_count = cur.fetchone()[0]
+            print(f"[Render DB Bootstrap] Current items count in database: {current_count}")
     else:
         print("[Render DB Bootstrap] WARNING: datasource_items.sql not found.")
 
