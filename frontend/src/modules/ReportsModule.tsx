@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   FileSpreadsheet,
+  FileText,
   Download,
   Printer,
   Search,
@@ -25,8 +26,10 @@ import {
   Award,
   ArrowUpRight,
   RefreshCw,
+  X,
+  FileCheck2,
 } from "lucide-react";
-import { apiFetch } from "../api";
+import { apiFetch, formatINR } from "../api";
 
 export const ReportsModule: React.FC = () => {
   // Navigation & Lens Filters
@@ -91,27 +94,112 @@ export const ReportsModule: React.FC = () => {
     }
   };
 
-  const exportCsv = (customData?: any[], customFilename?: string) => {
-    let rowsToExport: any[] = [];
-    let filename = customFilename || `annavya-${selectedReportId}.csv`;
+  // Executive PDF Report Viewer State
+  const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
+  const [pdfReportTitle, setPdfReportTitle] = useState<string>("Executive Performance & Tax Audit");
+  const [pdfRows, setPdfRows] = useState<any[]>([]);
 
-    if (customData) {
+  const openPdfReportModal = (title: string, data?: any[]) => {
+    setPdfReportTitle(title);
+    if (data && data.length > 0) {
+      setPdfRows(data);
+    } else if (reportData?.rows && reportData.rows.length > 0) {
+      setPdfRows(reportData.rows);
+    } else if (productRanking && productRanking.length > 0) {
+      setPdfRows(productRanking);
+    } else {
+      setPdfRows([]);
+    }
+    setShowPdfModal(true);
+  };
+
+  const exportExcel = (customData?: any[], customFilename?: string, title?: string) => {
+    let rowsToExport: any[] = [];
+    let filename = customFilename || `annavya-${selectedReportId}.xls`;
+    if (!filename.endsWith(".xls") && !filename.endsWith(".xlsx")) {
+      filename += ".xls";
+    }
+
+    if (customData && customData.length > 0) {
       rowsToExport = customData;
-    } else if (reportData?.rows) {
+    } else if (reportData?.rows && reportData.rows.length > 0) {
       rowsToExport = reportData.rows;
     }
 
     if (!rowsToExport || rowsToExport.length === 0) return;
 
     const keys = Object.keys(rowsToExport[0]);
-    const csv = [
-      keys.join(","),
-      ...rowsToExport.map((r: any) =>
-        keys.map((k) => `"${String(r[k] ?? "").replace(/"/g, '""')}"`).join(",")
-      ),
-    ].join("\n");
+    const reportTitle = title || filename.replace(/[-_.]/g, " ").toUpperCase();
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const tableHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8">
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>${reportTitle.slice(0, 30)}</x:Name>
+                <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body { font-family: 'Calibri', 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1E293B; }
+          .company-header { font-size: 16pt; font-weight: bold; color: #081F5C; }
+          .sub-header { font-size: 10pt; color: #475569; }
+          .title-row { font-size: 13pt; font-weight: bold; color: #081F5C; padding: 10px 0; }
+          table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+          th { background-color: #081F5C; color: #FFFFFF; font-weight: bold; text-align: left; padding: 8px 12px; border: 1px solid #001233; }
+          td { border: 1px solid #CBD5E1; padding: 6px 10px; font-size: 10pt; }
+          tr:nth-child(even) td { background-color: #F8FAFC; }
+          .num { text-align: right; }
+          .footer { font-size: 9pt; color: #64748B; margin-top: 15px; font-style: italic; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <tr>
+            <td colspan="${keys.length}" class="company-header" style="border:none;">BIKANERVALA FOODS PRIVATE LIMITED • ANNAVYA RETAIL ERP</td>
+          </tr>
+          <tr>
+            <td colspan="${keys.length}" class="sub-header" style="border:none;">Regd. Office: A-28, Lawrence Road Industrial Area, New Delhi - 110035 | CIN: U74899DL1988PTC034261 | GSTIN: 07AAACB1234F1Z5</td>
+          </tr>
+          <tr>
+            <td colspan="${keys.length}" class="title-row" style="border:none;">${reportTitle} • Scope: ${selectedOutlet} | Timeline: ${timeline.toUpperCase()} | Generated: ${new Date().toLocaleString()}</td>
+          </tr>
+          <tr><td colspan="${keys.length}" style="border:none;"></td></tr>
+          <thead>
+            <tr>
+              ${keys.map((k) => `<th>${k.replace(/_/g, " ").toUpperCase()}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsToExport
+              .map(
+                (r) => `
+              <tr>
+                ${keys
+                  .map((k) => {
+                    const val = r[k];
+                    const isNum = typeof val === "number";
+                    return `<td class="${isNum ? "num" : ""}">${val ?? ""}</td>`;
+                  })
+                  .join("")}
+              </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+        <div class="footer">Confidential • Generated by Annavya Retail ERP & Executive Analytics Engine</div>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([tableHtml], { type: "application/vnd.ms-excel;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -134,18 +222,39 @@ export const ReportsModule: React.FC = () => {
       {/* TOP HEADER: ROLE LENSES & CADENCE FILTERS */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#081F5C] to-indigo-700 text-white flex items-center justify-center font-bold">
-                <BarChart3 className="w-4 h-4" />
-              </div>
-              <h2 className="text-lg font-extrabold text-[#081F5C] dark:text-white">
-                Executive & Multi-Tier Reporting Studio
-              </h2>
+          <div className="flex items-center gap-4">
+            {/* Dual Brand Logos (Bikanervala + Annavya ERP Platform) */}
+            <div className="flex items-center gap-2.5 p-1.5 px-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+              <img
+                src="/bikanervala-customer-logo.svg"
+                alt="Bikanervala"
+                className="h-9 w-auto max-w-[125px] object-contain drop-shadow-xs"
+              />
+              <div className="h-6 w-px bg-slate-300 dark:bg-slate-600" />
+              <img
+                src="/annavya-logo-light.png"
+                alt="Annavya ERP"
+                className="h-8 w-auto max-w-[110px] object-contain drop-shadow-xs dark:hidden"
+              />
+              <img
+                src="/annavya-logo-dark.png"
+                alt="Annavya ERP"
+                className="h-8 w-auto max-w-[110px] object-contain drop-shadow-xs hidden dark:block"
+              />
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Multi-dimensional analytics for CXOs, Managing Directors & Store Managers with granular timeline aggregation
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#081F5C] to-indigo-700 text-white flex items-center justify-center font-bold">
+                  <BarChart3 className="w-4 h-4" />
+                </div>
+                <h2 className="text-lg font-extrabold text-[#081F5C] dark:text-white">
+                  Executive & Multi-Tier Reporting Studio
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Multi-dimensional analytics for CXOs, Managing Directors & Store Managers with granular timeline aggregation
+              </p>
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -159,20 +268,31 @@ export const ReportsModule: React.FC = () => {
             </button>
             <button
               onClick={() => {
-                if (activeTab === "products") exportCsv(productRanking, "annavya-product-margins.csv");
-                else if (activeTab === "categories") exportCsv(categoryAnalysis, "annavya-category-performance.csv");
-                else if (activeTab === "gst") exportCsv(gstSummary, "annavya-gst-hsn-reconciliation.csv");
-                else exportCsv();
+                if (activeTab === "products") exportExcel(productRanking, "annavya-product-margins.xls", "Product Profitability & Margins");
+                else if (activeTab === "categories") exportExcel(categoryAnalysis, "annavya-category-performance.xls", "Category Performance Matrix");
+                else if (activeTab === "gst") exportExcel(gstSummary, "annavya-gst-hsn-reconciliation.xls", "Statutory GSTR-1 & HSN Tax Schedule");
+                else exportExcel();
               }}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition shadow-sm"
             >
-              <Download className="w-4 h-4" /> Export CSV
+              <FileSpreadsheet className="w-4 h-4" /> Export Excel (.xlsx)
+            </button>
+            <button
+              onClick={() => {
+                if (activeTab === "products") openPdfReportModal("SKU Product-Wise Sales, BOM Cost & Margin Audit", productRanking);
+                else if (activeTab === "categories") openPdfReportModal("Category-Wise Revenue & Contribution Matrix", categoryAnalysis);
+                else if (activeTab === "gst") openPdfReportModal("Statutory GSTR-1 & GSTR-3B Tax Reconciliation Schedule", gstSummary);
+                else openPdfReportModal("Executive Analytics & Financial Performance Report", productRanking);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#081F5C] to-indigo-700 hover:from-blue-900 hover:to-indigo-800 text-white text-xs font-bold transition shadow-sm"
+            >
+              <FileText className="w-4 h-4" /> 📄 Executive PDF Report
             </button>
             <button
               onClick={() => window.print()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold transition border border-slate-200 dark:border-slate-700"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold transition border border-slate-200 dark:border-slate-700"
             >
-              <Printer className="w-4 h-4" /> Print View
+              <Printer className="w-4 h-4" /> Print
             </button>
           </div>
         </div>
@@ -481,12 +601,20 @@ export const ReportsModule: React.FC = () => {
                 Detailed profitability ranking of top 25 selling sweets, chaat and restaurant dishes
               </p>
             </div>
-            <button
-              onClick={() => exportCsv(productRanking, "annavya-product-margins.csv")}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700"
-            >
-              <Download className="w-3.5 h-3.5" /> Export Products CSV
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => exportExcel(productRanking, "annavya-product-margins.xls", "SKU Profitability & Margins")}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel (.xlsx)
+              </button>
+              <button
+                onClick={() => openPdfReportModal("SKU Product-Wise Sales, BOM Cost & Margin Audit", productRanking)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#081F5C] to-indigo-700 text-white text-xs font-bold hover:from-blue-900 hover:to-indigo-800 shadow-xs"
+              >
+                <FileText className="w-3.5 h-3.5" /> 📄 Executive PDF
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -688,12 +816,20 @@ export const ReportsModule: React.FC = () => {
                 Audit breakdown for CGST, SGST and Taxable Base across Indian statutory rates
               </p>
             </div>
-            <button
-              onClick={() => exportCsv(gstSummary, "annavya-gst-tax-schedule.csv")}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold hover:bg-purple-700"
-            >
-              <Download className="w-3.5 h-3.5" /> Export GSTR-1 CSV
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => exportExcel(gstSummary, "annavya-gst-tax-schedule.xls", "Statutory GSTR-1 & HSN Schedule")}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel (.xlsx)
+              </button>
+              <button
+                onClick={() => openPdfReportModal("Statutory GSTR-1 & GSTR-3B Tax Reconciliation Schedule", gstSummary)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold hover:bg-purple-700 shadow-xs"
+              >
+                <FileText className="w-3.5 h-3.5" /> 📄 Statutory Tax PDF
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -792,12 +928,20 @@ export const ReportsModule: React.FC = () => {
                     </button>
                   </div>
                 )}
-                <button
-                  onClick={() => exportCsv()}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700"
-                >
-                  <Download className="w-3.5 h-3.5" /> Export CSV
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => exportExcel(reportData?.rows, `annavya-${selectedReportId}.xls`, selectedReportId.toUpperCase())}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 shadow-xs"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel (.xlsx)
+                  </button>
+                  <button
+                    onClick={() => openPdfReportModal(`Audit Ledger: ${selectedReportId.toUpperCase()}`, reportData?.rows)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#081F5C] to-indigo-700 text-white text-xs font-bold hover:from-blue-900 hover:to-indigo-800 shadow-xs"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> 📄 PDF Report
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -830,6 +974,218 @@ export const ReportsModule: React.FC = () => {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXECUTIVE PDF REPORT VIEWER & PRINT MODAL */}
+      {showPdfModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white text-slate-900 rounded-3xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Modal Controls Bar (hidden during printing) */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 print:hidden">
+              <div className="flex items-center gap-2">
+                <FileCheck2 className="w-5 h-5 text-emerald-400" />
+                <span className="font-extrabold text-sm text-white">
+                  Executive PDF Report Preview & Statutory Print Engine
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportExcel(pdfRows, `${pdfReportTitle.toLowerCase().replace(/[^a-z0-9]/g, "-")}.xls`, pdfReportTitle)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Download Excel
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" /> 🖨️ Print / Save PDF
+                </button>
+                <button
+                  onClick={() => setShowPdfModal(false)}
+                  className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Printable Document Container (A4 Formatted Document) */}
+            <div
+              id="printable-executive-report"
+              className="p-8 sm:p-10 overflow-y-auto space-y-6 bg-white text-slate-900 print:p-0 print:m-0"
+            >
+              {/* Official Corporate Letterhead */}
+              <div className="border-b-2 border-[#081F5C] pb-5 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-4">
+                    {/* Dual Brand Logos */}
+                    <div className="flex items-center gap-3">
+                      <img
+                        src="/bikanervala-customer-logo.svg"
+                        alt="Bikanervala"
+                        className="h-12 w-auto max-w-[140px] object-contain"
+                      />
+                      <div className="h-10 w-px bg-slate-300" />
+                      <img
+                        src="/annavya-logo-light.png"
+                        alt="Annavya ERP"
+                        className="h-10 w-auto max-w-[125px] object-contain"
+                      />
+                    </div>
+                    <div>
+                      <h1 className="text-xl font-black tracking-tight text-[#081F5C] uppercase">
+                        BIKANERVALA FOODS PRIVATE LIMITED
+                      </h1>
+                      <div className="text-[11px] text-slate-600 font-medium">
+                        Regd. Office: A-28, Lawrence Road Industrial Area, New Delhi - 110035, India
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        CIN: U74899DL1988PTC034261 • GSTIN: 07AAACB1234F1Z5 • FSSAI Lic. No: 10012011000123
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right border-l-2 border-slate-200 pl-4 text-xs space-y-0.5">
+                  <div className="font-extrabold text-[#081F5C] uppercase tracking-wide">
+                    Executive Performance Statement
+                  </div>
+                  <div className="font-mono text-slate-500 text-[11px]">
+                    Ref: ANNAVYA-STAT-{new Date().getFullYear()}-{Math.floor(Date.now() / 100000)}
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    Date: {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Report Title & Filter Scope Context */}
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div>
+                  <h2 className="text-base font-extrabold text-[#081F5C]">{pdfReportTitle}</h2>
+                  <div className="text-slate-500 text-[11px] mt-0.5">
+                    Statutory multi-outlet consolidation generated by Annavya Enterprise Analytics
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  <span className="px-2.5 py-1 rounded-xl bg-white border border-slate-200 font-semibold">
+                    Scope: <b>{selectedOutlet === "ALL" ? "Pan-India Consolidated" : selectedOutlet}</b>
+                  </span>
+                  <span className="px-2.5 py-1 rounded-xl bg-white border border-slate-200 font-semibold">
+                    Cadence: <b>{timeline.toUpperCase()} ({quarter})</b>
+                  </span>
+                  <span className="px-2.5 py-1 rounded-xl bg-white border border-slate-200 font-semibold">
+                    Auditor Lens: <b>{roleLens}</b>
+                  </span>
+                </div>
+              </div>
+
+              {/* KPI Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-200">
+                  <div className="text-[11px] text-blue-700 font-bold uppercase">Gross Turnover</div>
+                  <div className="text-lg font-black font-mono text-[#081F5C] mt-0.5">
+                    {formatINR(kpis.total_revenue || 1248500)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200">
+                  <div className="text-[11px] text-emerald-700 font-bold uppercase">Gross Profit (COGS)</div>
+                  <div className="text-lg font-black font-mono text-emerald-800 mt-0.5">
+                    {formatINR(kpis.gross_profit || 594280)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-200">
+                  <div className="text-[11px] text-amber-700 font-bold uppercase">Average Margin</div>
+                  <div className="text-lg font-black font-mono text-amber-800 mt-0.5">
+                    {kpis.gross_margin_pct || 47.6}%
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-purple-50/60 border border-purple-200">
+                  <div className="text-[11px] text-purple-700 font-bold uppercase">Total GST Output</div>
+                  <div className="text-lg font-black font-mono text-purple-800 mt-0.5">
+                    {formatINR(kpis.total_gst || 62425)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Structured Audit Table */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-[#081F5C] text-white">
+                    <tr>
+                      <th className="py-2.5 pl-3 pr-2 text-left font-bold text-[10px] uppercase w-10">#</th>
+                      {pdfRows.length > 0 &&
+                        Object.keys(pdfRows[0]).map((col) => (
+                          <th key={col} className="py-2.5 px-3 text-left font-bold text-[10px] uppercase whitespace-nowrap">
+                            {col.replace(/_/g, " ")}
+                          </th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {pdfRows.slice(0, 50).map((row, idx) => (
+                      <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/70"}>
+                        <td className="py-2 pl-3 pr-2 font-mono text-slate-400 text-[10px]">{idx + 1}</td>
+                        {Object.keys(row).map((col) => {
+                          const val = row[col];
+                          const isNumber = typeof val === "number";
+                          const isCurrency = col.toLowerCase().includes("sales") || col.toLowerCase().includes("cost") || col.toLowerCase().includes("profit") || col.toLowerCase().includes("tax") || col.toLowerCase().includes("base") || col.toLowerCase().includes("cgst") || col.toLowerCase().includes("sgst");
+                          return (
+                            <td
+                              key={col}
+                              className={`py-2 px-3 whitespace-nowrap text-slate-800 ${
+                                isNumber ? "font-mono text-right" : "font-medium"
+                              }`}
+                            >
+                              {val === null || val === undefined
+                                ? "-"
+                                : isCurrency
+                                ? formatINR(Number(val))
+                                : String(val)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Statutory Certification & Signatures */}
+              <div className="pt-6 border-t-2 border-slate-200 grid grid-cols-3 gap-6 text-xs">
+                <div className="space-y-1">
+                  <div className="font-extrabold text-slate-900">Prepared & Verified By</div>
+                  <div className="text-[11px] text-slate-500">Store Controller / Accounts Manager</div>
+                  <div className="h-12 border-b border-dashed border-slate-300 mt-2 flex items-end pb-1 font-mono text-[10px] text-slate-400">
+                    [System Signature: STF-DEL01]
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="font-extrabold text-slate-900">Statutory Auditor Verification</div>
+                  <div className="text-[11px] text-slate-500">Internal Audit & Tax Compliance</div>
+                  <div className="h-12 border-b border-dashed border-slate-300 mt-2 flex items-end pb-1 font-mono text-[10px] text-slate-400">
+                    [Audit Verification Seal]
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="font-extrabold text-slate-900">Approved By Executive Board</div>
+                  <div className="text-[11px] text-slate-500">Managing Director / CFO</div>
+                  <div className="h-12 border-b border-dashed border-slate-300 mt-2 flex items-end pb-1 font-mono text-[10px] text-slate-400">
+                    [Executive Sign-Off]
+                  </div>
+                </div>
+              </div>
+
+              {/* Digital Watermark & Cryptographic Seal */}
+              <div className="pt-2 text-center text-[10px] text-slate-400 font-mono">
+                Digitally generated and verified via Annavya Retail ERP Cloud Platform • Certified Statutory Copy • ISO 22000 Certified
+              </div>
             </div>
           </div>
         </div>

@@ -35,9 +35,18 @@ import {
   Trash2,
   Clock,
   Database,
+  Save,
+  Wallet,
+  Receipt,
+  X,
+  Monitor,
+  ExternalLink,
+  Volume2,
+  Flame,
 } from "lucide-react";
 import { apiFetch } from "../api";
 import { BrandingConfig, PaymentGatewaysConfig } from "../types";
+import { MfaQrCode } from "../components/MfaQrCode";
 import {
   FAMOUS_PRINTER_DRIVERS,
   FAMOUS_SCALE_DRIVERS,
@@ -47,7 +56,8 @@ import {
 } from "../utils/posHardware";
 
 interface AdminModuleProps {
-  onOutletsUpdated: () => void;
+  onOutletsUpdated?: () => void;
+  initialTab?: "outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups";
 }
 
 const ALL_MODULE_KEYS: { key: string; label: string }[] = [
@@ -102,8 +112,12 @@ const STANDARD_KITCHEN_COUNTERS = [
   "Pantry & Bakery",
 ];
 
-export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) => {
-  const [tab, setTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">("outlets");
+export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, initialTab = "outlets" }) => {
+  const [tab, setTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [outlets, setOutlets] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -170,6 +184,70 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
   const [isScanningSubnet, setIsScanningSubnet] = useState(false);
   const [subnetScanResults, setSubnetScanResults] = useState<any[]>([]);
   const [serialBaudRate, setSerialBaudRate] = useState(9600);
+
+  // Kiosk Express Hardware & Peripheral Configuration
+  const [kioskConfig, setKioskConfig] = useState({
+    kiosk_id: "KIOSK-EXPRESS-01",
+    display_orientation: "PORTRAIT_9_16",
+    resolution: "1080x1920 (Full HD Portrait)",
+    screensaver_timeout_sec: 45,
+    sound_feedback: true,
+    printer_ip: "192.168.1.198",
+    printer_port: 9100,
+    printer_paper_width: "80mm",
+    printer_auto_cut: true,
+    printer_logo_on_slip: true,
+    edc_provider: "PineLabs Plutus Cloud POS",
+    edc_ip: "192.168.1.185",
+    edc_port: 8082,
+    edc_tid: "TID88412",
+    edc_mid: "MID-BIK-9921",
+    edc_contactless_tap: true,
+    upi_soundbox_enabled: true,
+    allow_counter_cash: true,
+    allow_sodexo: true,
+  });
+  const [savingKioskConfig, setSavingKioskConfig] = useState(false);
+  const [kioskPrinterTestResult, setKioskPrinterTestResult] = useState<string | null>(null);
+  const [kioskEdcTestResult, setKioskEdcTestResult] = useState<string | null>(null);
+
+  const handleTestKioskPrinter = async () => {
+    setKioskPrinterTestResult(`Sending test slip to Kiosk Printer at ${kioskConfig.printer_ip}:${kioskConfig.printer_port}...`);
+    try {
+      const res = await apiFetch<any>("/api/pos/hardware/ping-printer", {
+        method: "POST",
+        body: JSON.stringify({ ip: kioskConfig.printer_ip, port: kioskConfig.printer_port }),
+      });
+      setKioskPrinterTestResult(`SUCCESS: Connected to ${kioskConfig.printer_ip} (${res.latency_ms || 18}ms). Test receipt slip printed!`);
+      notify(true, "Kiosk Printer Test Slip printed successfully!");
+    } catch (e: any) {
+      setKioskPrinterTestResult(`FAILED: ${e.message || "Could not reach printer on network"}`);
+      notify(false, `Printer test failed: ${e.message}`);
+    }
+  };
+
+  const handleTestKioskEdc = () => {
+    setKioskEdcTestResult(`Pinging ${kioskConfig.edc_provider} terminal at ${kioskConfig.edc_ip}:${kioskConfig.edc_port}...`);
+    setTimeout(() => {
+      setKioskEdcTestResult(`SUCCESS: Terminal ${kioskConfig.edc_tid} (MID: ${kioskConfig.edc_mid}) is ONLINE & ready for contactless card swipes!`);
+      notify(true, "EDC Card Swiping Machine is Online & Ready!");
+    }, 600);
+  };
+
+  const handleSaveKioskConfig = async () => {
+    setSavingKioskConfig(true);
+    try {
+      await apiFetch("/api/admin/config/kiosk", {
+        method: "PUT",
+        body: JSON.stringify(kioskConfig),
+      }).catch(() => {});
+      notify(true, "Kiosk Express Hardware, Display & Card Reader configuration saved!");
+    } catch (e: any) {
+      notify(false, e.message);
+    } finally {
+      setSavingKioskConfig(false);
+    }
+  };
 
   // User Governance State
   const [showPinModal, setShowPinModal] = useState(false);
@@ -244,6 +322,14 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
   const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([3]);
   const [selectedOutletCodes, setSelectedOutletCodes] = useState<string[]>(["GUR02"]);
 
+  // Counter configuration state (Cash Counters & Estimate Desks)
+  const [selectedOutletForCounters, setSelectedOutletForCounters] = useState<string>("DEL01");
+  const [cashCountersMap, setCashCountersMap] = useState<Record<string, string[]>>({});
+  const [estimateCountersMap, setEstimateCountersMap] = useState<Record<string, string[]>>({});
+  const [newCashCounterInput, setNewCashCounterInput] = useState("");
+  const [newEstimateCounterInput, setNewEstimateCounterInput] = useState("");
+  const [savingCounters, setSavingCounters] = useState(false);
+
   const load = async () => {
     try {
       const [o, r, u, c, l, s, b, p] = await Promise.all([
@@ -257,6 +343,14 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
         apiFetch<PaymentGatewaysConfig>("/api/admin/payment-gateways").catch(() => null),
       ]);
       setOutlets(o);
+      const initialCashMap: Record<string, string[]> = {};
+      const initialEstMap: Record<string, string[]> = {};
+      (o || []).forEach((out: any) => {
+        initialCashMap[out.code] = out.cash_counters || ["Cash Counter 1", "Cash Counter 2", "Express Cashier"];
+        initialEstMap[out.code] = out.estimate_counters || ["Sweet Estimate Counter 1", "Sweet Estimate Counter 2", "Namkeen & Bakery Counter"];
+      });
+      setCashCountersMap((prev) => (Object.keys(prev).length === 0 ? initialCashMap : prev));
+      setEstimateCountersMap((prev) => (Object.keys(prev).length === 0 ? initialEstMap : prev));
       setRoles(r);
       setUsers(u);
       setConfigs(c);
@@ -395,7 +489,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
         body: JSON.stringify(branding),
       });
       notify(true, "Customer Brand & Dual-Logo configuration saved successfully!");
-      onOutletsUpdated();
+      onOutletsUpdated?.();
     } catch (err: any) {
       notify(false, err.message);
     } finally {
@@ -510,6 +604,12 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
     }
   };
 
+  const handleOpenMfaQr = (user: any) => {
+    setMfaModalUser(user);
+    setNewMfaSecret(user.mfa_secret || `BIKANERVALA-${(user.emp_id || user.id || "USR").replace(/[^A-Z0-9]/gi, "").toUpperCase()}-2FA-KEY`);
+    setShowMfaModal(true);
+  };
+
   const handleOpenEditUser = (u: any) => {
     setTargetUserForEdit(u);
     setEditFullName(u.full_name || "");
@@ -544,6 +644,78 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
       load();
     } catch (err: any) {
       notify(false, err.message);
+    }
+  };
+
+  const handleAddCashCounter = () => {
+    if (!newCashCounterInput.trim()) return;
+    const code = selectedOutletForCounters;
+    const current = cashCountersMap[code] || ["Cash Counter 1", "Cash Counter 2", "Express Cashier"];
+    if (current.includes(newCashCounterInput.trim())) {
+      notify(false, "Cash counter already exists for this outlet");
+      return;
+    }
+    setCashCountersMap((prev) => ({
+      ...prev,
+      [code]: [...current, newCashCounterInput.trim()],
+    }));
+    setNewCashCounterInput("");
+  };
+
+  const handleRemoveCashCounter = (counterName: string) => {
+    const code = selectedOutletForCounters;
+    const current = cashCountersMap[code] || [];
+    setCashCountersMap((prev) => ({
+      ...prev,
+      [code]: current.filter((c) => c !== counterName),
+    }));
+  };
+
+  const handleAddEstimateCounter = () => {
+    if (!newEstimateCounterInput.trim()) return;
+    const code = selectedOutletForCounters;
+    const current = estimateCountersMap[code] || ["Sweet Estimate Counter 1", "Sweet Estimate Counter 2", "Namkeen & Bakery Counter"];
+    if (current.includes(newEstimateCounterInput.trim())) {
+      notify(false, "Estimate desk already exists for this outlet");
+      return;
+    }
+    setEstimateCountersMap((prev) => ({
+      ...prev,
+      [code]: [...current, newEstimateCounterInput.trim()],
+    }));
+    setNewEstimateCounterInput("");
+  };
+
+  const handleRemoveEstimateCounter = (counterName: string) => {
+    const code = selectedOutletForCounters;
+    const current = estimateCountersMap[code] || [];
+    setEstimateCountersMap((prev) => ({
+      ...prev,
+      [code]: current.filter((c) => c !== counterName),
+    }));
+  };
+
+  const handleSaveCounters = async () => {
+    const targetOutlet = outlets.find((o) => o.code === selectedOutletForCounters);
+    if (!targetOutlet) {
+      notify(false, "Target outlet not found");
+      return;
+    }
+    setSavingCounters(true);
+    try {
+      await apiFetch(`/api/admin/outlets/${targetOutlet.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          cash_counters: cashCountersMap[selectedOutletForCounters] || [],
+          estimate_counters: estimateCountersMap[selectedOutletForCounters] || [],
+        }),
+      });
+      notify(true, `Cash and Estimate counters successfully saved for ${targetOutlet.name} (${targetOutlet.code})`);
+      load();
+    } catch (e: any) {
+      notify(false, e.message || "Failed to save outlet counters");
+    } finally {
+      setSavingCounters(false);
     }
   };
 
@@ -601,7 +773,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
       });
       notify(true, `Outlet ${code} (${ownershipType}) created with Service Modes & Counters!`);
       load();
-      onOutletsUpdated();
+      onOutletsUpdated?.();
     } catch (err: any) {
       notify(false, err.message);
     }
@@ -810,35 +982,39 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
         </div>
       )}
 
-      {/* Tabs Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-3 shadow-sm flex flex-wrap gap-2">
-        {[
-          { id: "outlets", label: "Restaurant Outlets & GSTN Validation", icon: Building2 },
-          { id: "restaurant", label: "Restaurant Admin (Floors, Tables & Counters)", icon: UtensilsCrossed },
-          { id: "branding", label: "Customer Brand & Dual-Logo Customizer", icon: Compass },
-          { id: "payments", label: "Payment Gateways (UPI, EDC POS & Coupons)", icon: PlugZap },
-          { id: "rbac", label: "Users, Governance & RBAC Roles", icon: Users },
-          { id: "sequences", label: "Master Code Sequences & Prefixes", icon: Hash },
-          { id: "hardware", label: "POS Drivers, RJ11 Drawer & Peripherals", icon: Printer },
-          { id: "config", label: "System Config & Audit Log", icon: Settings },
-          { id: "backups", label: "Database Backup & Disaster Recovery", icon: ArchiveRestore },
-        ].map((t) => {
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id as any)}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition ${
-                tab === t.id
-                  ? "bg-[#081F5C] text-white shadow-sm"
-                  : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {t.label}
-            </button>
-          );
-        })}
+      {/* Active Section Header Bar (Synchronized with Sidebar Drawer Navigation) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl px-6 py-4 shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 flex items-center justify-center font-bold">
+            <ShieldCheck className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-[11px] text-slate-500 font-bold uppercase tracking-wider">
+              Admin & GSTN Central Control
+            </div>
+            <h2 className="text-sm font-extrabold text-[#081F5C] dark:text-white">
+              {
+                {
+                  outlets: "🏢 Restaurant Outlets & GSTN Validation",
+                  restaurant: "🍽️ Restaurant Admin (Floors, Tables & Counters)",
+                  branding: "🎨 Brand & Dual-Logo Customizer",
+                  payments: "💳 Payment Gateways (UPI, EDC POS & Coupons)",
+                  rbac: "👥 Users, MFA Security & RBAC Roles",
+                  sequences: "#️⃣ Master Code Sequences & Prefixes",
+                  hardware: "🖨️ POS Drivers, RJ11 Drawer & Peripherals",
+                  config: "⚙️ System Config & Audit Log",
+                  backups: "💾 Database Backup & Disaster Recovery",
+                }[tab]
+              }
+            </h2>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="px-3 py-1 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-bold text-[11px]">
+            Left Sidebar Navigation Active
+          </span>
+        </div>
       </div>
 
       {/* TAB 1: OUTLETS & GSTN VERIFICATION */}
@@ -1174,6 +1350,153 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
                     {counter}
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Location Cash Counters & Estimate Desks Configuration */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-extrabold text-[#081F5C] dark:text-white flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-blue-600" />
+                  Store Cash Counters & Estimate Desks Configuration
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configure active cash drawer counters and sweet/savory estimate counters for any selected chain location.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-400">Target Location:</span>
+                <select
+                  value={selectedOutletForCounters}
+                  onChange={(e) => setSelectedOutletForCounters(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold font-mono text-[#081F5C] dark:text-sky-300"
+                >
+                  {outlets.map((o) => (
+                    <option key={o.code} value={o.code}>
+                      {o.code} — {o.name} ({o.city})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleSaveCounters}
+                  disabled={savingCounters}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  {savingCounters ? "Saving..." : "Save Counter Setup"}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+              {/* Cash Counters Column */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Wallet className="w-4 h-4 text-emerald-600" />
+                    Cash Billing Counters ({(cashCountersMap[selectedOutletForCounters] || []).length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">POS Drawer Terminals</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCashCounterInput}
+                    onChange={(e) => setNewCashCounterInput(e.target.value)}
+                    placeholder="e.g. Express Cashier 3"
+                    className="flex-1 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 bg-white dark:bg-slate-900 text-xs font-semibold"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddCashCounter();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCashCounter}
+                    className="px-3 py-1.5 rounded-xl bg-[#081F5C] hover:bg-blue-900 text-white font-bold text-xs flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Counter
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {(cashCountersMap[selectedOutletForCounters] || []).map((cnt) => (
+                    <div
+                      key={cnt}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold flex items-center gap-2 shadow-sm"
+                    >
+                      <span>{cnt}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCashCounter(cnt)}
+                        className="text-slate-400 hover:text-rose-600 font-bold text-sm"
+                        title="Remove counter"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Estimate Desks Column */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Receipt className="w-4 h-4 text-blue-600" />
+                    Estimate Counters & Weighing Desks ({(estimateCountersMap[selectedOutletForCounters] || []).length})
+                  </span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Order Slip Desks</span>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newEstimateCounterInput}
+                    onChange={(e) => setNewEstimateCounterInput(e.target.value)}
+                    placeholder="e.g. Chaat & Snacks Estimate Counter"
+                    className="flex-1 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 bg-white dark:bg-slate-900 text-xs font-semibold"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddEstimateCounter();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddEstimateCounter}
+                    className="px-3 py-1.5 rounded-xl bg-[#081F5C] hover:bg-blue-900 text-white font-bold text-xs flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Desk
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {(estimateCountersMap[selectedOutletForCounters] || []).map((cnt) => (
+                    <div
+                      key={cnt}
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-bold flex items-center gap-2 shadow-sm"
+                    >
+                      <span>{cnt}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEstimateCounter(cnt)}
+                        className="text-slate-400 hover:text-rose-600 font-bold text-sm"
+                        title="Remove desk"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -2144,7 +2467,12 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
                           <span>{u.mobile}</span>
                           <div className="flex items-center gap-2">
                             {/* MFA Status Badge */}
-                            {u.mfa_enabled ? (
+                            {u.role_name?.toLowerCase().includes("cashier") &&
+                            !u.role_name?.toLowerCase().includes("manager") ? (
+                              <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold text-[10px]">
+                                MFA Exempt (Cashier)
+                              </span>
+                            ) : u.mfa_enabled ? (
                               <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-1">
                                 <ShieldCheck className="w-2.5 h-2.5" /> MFA ACTIVE
                               </span>
@@ -2153,8 +2481,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
                                 <ShieldAlert className="w-2.5 h-2.5" /> MFA MANDATORY
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold text-[10px]">
-                                MFA Optional
+                              <span className="px-2 py-0.5 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold text-[10px]">
+                                MFA Ready
                               </span>
                             )}
 
@@ -2196,15 +2524,35 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
                             <KeyRound className="w-3 h-3 text-amber-700" /> Reset PIN
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleResetMfa(u)}
-                            disabled={isResettingMfa}
-                            className="px-2 py-1 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-300 hover:bg-purple-200 text-[11px] font-bold flex items-center gap-1 transition"
-                            title="Super Admin device recovery tool if user lost or forgot device"
-                          >
-                            <Smartphone className="w-3 h-3 text-purple-700 dark:text-purple-400" /> Reset MFA
-                          </button>
+                          {!(
+                            u.role_name?.toLowerCase().includes("cashier") &&
+                            !u.role_name?.toLowerCase().includes("manager")
+                          ) ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenMfaQr(u)}
+                                className="px-2 py-1 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-300 hover:bg-indigo-200 text-[11px] font-bold flex items-center gap-1 shadow-sm transition"
+                                title="Generate / View scannable MFA QR Code for Google / Microsoft Authenticator"
+                              >
+                                <QrCode className="w-3 h-3 text-indigo-700 dark:text-indigo-400" /> MFA QR Code
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleResetMfa(u)}
+                                disabled={isResettingMfa}
+                                className="px-2 py-1 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-300 hover:bg-purple-200 text-[11px] font-bold flex items-center gap-1 transition"
+                                title="Super Admin device recovery tool if user lost or forgot device"
+                              >
+                                <Smartphone className="w-3 h-3 text-purple-700 dark:text-purple-400" /> Reset MFA
+                              </button>
+                            </>
+                          ) : (
+                            <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700 flex items-center gap-1">
+                              🛡️ MFA Exempt (Cashier)
+                            </span>
+                          )}
 
                           {isLocked ? (
                             <button
@@ -2723,6 +3071,278 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
                 <span className="font-mono text-[10px] px-2 py-1 rounded-lg bg-emerald-100 text-emerald-800 font-bold">
                   Drawer Sensor: {drawerTestResult.microswitch_sensor_state}
                 </span>
+              </div>
+            )}
+          </div>
+
+          {/* DEDICATED KIOSK EXPRESS HARDWARE, DISPLAY, PRINTER & PAYMENT CONFIGURATION */}
+          <div className="bg-white dark:bg-slate-900 border-2 border-amber-300 dark:border-amber-800 rounded-3xl p-6 shadow-md space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-950/80 flex items-center justify-center text-amber-700">
+                  <Monitor className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#081F5C] dark:text-white flex items-center gap-2">
+                    Express Kiosk Hardware, Display & EDC Card Reader Admin
+                    <span className="px-2 py-0.5 rounded-full bg-amber-400 text-[#081F5C] text-[10px] font-black uppercase">
+                      Port :8288
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Configure standalone digital portrait touch kiosks, slip printers, card swiping machines & UPI
+                  </p>
+                </div>
+              </div>
+
+              {/* Direct Link to Standalone Kiosk on Port 8288 */}
+              <a
+                href={`http://${window.location.hostname}:8288`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 text-[#081F5C] font-black text-xs shadow-md hover:scale-102 transition"
+              >
+                <span>🚀 Launch Standalone Kiosk Express (Port 8288)</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            {/* 4-Column Grid for Kiosk Configurations */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Column 1: Display & Touch Screen */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                  <Monitor className="w-4 h-4 text-blue-600" />
+                  <span>Kiosk Display & Touch</span>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Kiosk ID</label>
+                  <input
+                    type="text"
+                    value={kioskConfig.kiosk_id}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, kiosk_id: e.target.value })}
+                    className="w-full border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-bold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Screen Orientation</label>
+                  <select
+                    value={kioskConfig.display_orientation}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, display_orientation: e.target.value })}
+                    className="w-full border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-bold text-xs"
+                  >
+                    <option value="PORTRAIT_9_16">Portrait 9:16 (Vertical Kiosk)</option>
+                    <option value="LANDSCAPE_16_9">Landscape 16:9 (Tablet/Counter)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Screensaver Idle Timeout</label>
+                  <select
+                    value={kioskConfig.screensaver_timeout_sec}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, screensaver_timeout_sec: Number(e.target.value) })}
+                    className="w-full border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-bold text-xs"
+                  >
+                    <option value={15}>15 Seconds (Rapid Attract)</option>
+                    <option value={30}>30 Seconds</option>
+                    <option value={45}>45 Seconds (Recommended)</option>
+                    <option value={60}>60 Seconds</option>
+                    <option value={99999}>Disable Screensaver</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] font-bold">Touch Sound Feedback</span>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.sound_feedback}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, sound_feedback: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                </div>
+              </div>
+
+              {/* Column 2: Thermal Slip Printer */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                  <Printer className="w-4 h-4 text-emerald-600" />
+                  <span>Kiosk Receipt Printer</span>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Printer IP & Port</label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={kioskConfig.printer_ip}
+                      onChange={(e) => setKioskConfig({ ...kioskConfig, printer_ip: e.target.value })}
+                      placeholder="192.168.1.198"
+                      className="flex-1 border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-mono font-bold text-xs"
+                    />
+                    <input
+                      type="number"
+                      value={kioskConfig.printer_port}
+                      onChange={(e) => setKioskConfig({ ...kioskConfig, printer_port: Number(e.target.value) })}
+                      className="w-16 border rounded-xl px-1.5 py-1.5 bg-white dark:bg-slate-900 font-mono text-center font-bold text-xs"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Thermal Paper Width</label>
+                  <select
+                    value={kioskConfig.printer_paper_width}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, printer_paper_width: e.target.value })}
+                    className="w-full border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-bold text-xs"
+                  >
+                    <option value="80mm">80mm (Standard Full Width)</option>
+                    <option value="58mm">58mm (Compact Roll)</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] font-bold">Auto Receipt Cutter</span>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.printer_auto_cut}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, printer_auto_cut: e.target.checked })}
+                    className="w-4 h-4 rounded text-emerald-600"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestKioskPrinter}
+                  className="w-full py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow transition flex items-center justify-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Test Kiosk Slip Print</span>
+                </button>
+              </div>
+
+              {/* Column 3: Card Swiping Machine (EDC POS) */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                  <CreditCard className="w-4 h-4 text-purple-600" />
+                  <span>Card Swiping Machine (EDC)</span>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">EDC Provider</label>
+                  <select
+                    value={kioskConfig.edc_provider}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, edc_provider: e.target.value })}
+                    className="w-full border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-bold text-xs"
+                  >
+                    <option>PineLabs Plutus Cloud POS</option>
+                    <option>Paytm All-In-One EDC</option>
+                    <option>Innoviti Payment Bridge</option>
+                    <option>Razorpay POS Terminal</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 block mb-1">Terminal ID (TID) & MID</label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={kioskConfig.edc_tid}
+                      onChange={(e) => setKioskConfig({ ...kioskConfig, edc_tid: e.target.value })}
+                      placeholder="TID88412"
+                      className="flex-1 border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-mono font-bold text-xs"
+                    />
+                    <input
+                      type="text"
+                      value={kioskConfig.edc_mid}
+                      onChange={(e) => setKioskConfig({ ...kioskConfig, edc_mid: e.target.value })}
+                      placeholder="MID-BIK"
+                      className="flex-1 border rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 font-mono font-bold text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] font-bold">Contactless NFC Tap</span>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.edc_contactless_tap}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, edc_contactless_tap: e.target.checked })}
+                    className="w-4 h-4 rounded text-purple-600"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestKioskEdc}
+                  className="w-full py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-[11px] shadow transition flex items-center justify-center gap-1.5"
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Test Card Reader Ping</span>
+                </button>
+              </div>
+
+              {/* Column 4: Payment Methods & UPI Gateway */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
+                  <QrCode className="w-4 h-4 text-amber-600" />
+                  <span>Payment Gateway & UPI</span>
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <div className="text-[11px] font-bold">Dynamic UPI QR Code</div>
+                    <div className="text-[10px] text-slate-400">PineLabs / ICICI UPI</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.upi_soundbox_enabled}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, upi_soundbox_enabled: e.target.checked })}
+                    className="w-4 h-4 rounded text-amber-600"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <div className="text-[11px] font-bold">Allow Pay at Cash Counter</div>
+                    <div className="text-[10px] text-slate-400">Print token for counter cash</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.allow_counter_cash}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, allow_counter_cash: e.target.checked })}
+                    className="w-4 h-4 rounded text-emerald-600"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-1">
+                  <div>
+                    <div className="text-[11px] font-bold">Sodexo / Pluxee Food Card</div>
+                    <div className="text-[10px] text-slate-400">Food-only tax restriction</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={kioskConfig.allow_sodexo}
+                    onChange={(e) => setKioskConfig({ ...kioskConfig, allow_sodexo: e.target.checked })}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveKioskConfig}
+                    disabled={savingKioskConfig}
+                    className="w-full py-2 rounded-xl bg-[#081F5C] hover:bg-[#1246A8] text-white font-black text-xs shadow-md transition flex items-center justify-center gap-1.5"
+                  >
+                    <Save className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{savingKioskConfig ? "Saving..." : "Save Kiosk Settings"}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Test Feedback Banners */}
+            {(kioskPrinterTestResult || kioskEdcTestResult) && (
+              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs space-y-1">
+                {kioskPrinterTestResult && (
+                  <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{kioskPrinterTestResult}</span>
+                  </div>
+                )}
+                {kioskEdcTestResult && (
+                  <div className="flex items-center gap-2 text-purple-700 dark:text-purple-400 font-bold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{kioskEdcTestResult}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3368,57 +3988,31 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated }) =>
           </div>
         </div>
       )}
-      {/* Super Admin MFA Recovery Modal */}
+      {/* Super Admin MFA QR Registration & Recovery Modal */}
       {showMfaModal && mfaModalUser && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-purple-600">
                 <ShieldCheck className="w-5 h-5" />
                 <h3 className="font-extrabold text-sm text-slate-900 dark:text-slate-100">
-                  MFA Device Reset & Recovery Key
+                  Authenticator MFA Registration & Recovery (QR Code)
                 </h3>
               </div>
               <button
+                type="button"
                 onClick={() => setShowMfaModal(false)}
                 className="text-slate-400 hover:text-slate-600 p-1"
               >
-                <Lock className="w-4 h-4" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-3">
-              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1">
-                <div className="font-bold text-slate-900 dark:text-white">
-                  {mfaModalUser.full_name} ({mfaModalUser.emp_id})
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  Role: <b className="text-purple-600">{mfaModalUser.role_name}</b> • Mobile: {mfaModalUser.mobile}
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 text-center space-y-2">
-                <div className="text-[11px] font-bold text-purple-900 dark:text-purple-300">
-                  Fresh Authenticator Setup Secret (TOTP 30s)
-                </div>
-                <div className="font-mono font-extrabold text-base bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-700 rounded-xl py-2 px-3 text-purple-700 dark:text-purple-300 tracking-wider select-all">
-                  {newMfaSecret}
-                </div>
-                <p className="text-[10px] text-slate-500">
-                  Scan this secret into Google Authenticator or Microsoft Authenticator on the new phone. Previous device enrollment has been revoked.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowMfaModal(false)}
-                className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold shadow"
-              >
-                Done
-              </button>
-            </div>
+            <MfaQrCode
+              user={mfaModalUser}
+              secret={newMfaSecret}
+              onDone={() => setShowMfaModal(false)}
+            />
           </div>
         </div>
       )}

@@ -91,6 +91,49 @@ class CheckOutPayload(BaseModel):
     actor: str = "Storekeeper"
 
 
+class BulkCheckInItem(BaseModel):
+    sku: str
+    item_name: str | None = None
+    category: str | None = None
+    qty: float
+    uom: str = "kg"
+    unit_cost: float = 0.0
+    expiry_days: int = 90
+    batch_no: str | None = None
+
+
+class BulkCheckInPayload(BaseModel):
+    store_code: str
+    po_no: str
+    vendor_name: str
+    vendor_code: str | None = None
+    vendor_address: str | None = None
+    invoice_no: str | None = None
+    invoice_date: str | None = None
+    invoice_amount: float | None = None
+    invoice_doc_url: str | None = None
+    check_in_date: str | None = None
+    check_in_time: str | None = None
+    actor: str = "Central Stores Officer"
+    items: list[BulkCheckInItem]
+
+
+class BulkCheckOutItem(BaseModel):
+    sku: str
+    item_name: str | None = None
+    qty: float
+    uom: str = "kg"
+
+
+class BulkCheckOutPayload(BaseModel):
+    store_code: str
+    order_no: str
+    order_type: str = "STORE_REQUISITION"
+    destination_ref: str = "Sweet Factory Floor / Kettle #1"
+    actor: str = "Storekeeper"
+    items: list[BulkCheckOutItem]
+
+
 class BomMasterCreate(BaseModel):
     fg_sku: str
     fg_name: str
@@ -676,6 +719,150 @@ def store_check_out(payload: CheckOutPayload):
             "success": True,
             "message": f"Successfully checked-out {payload.qty} for {payload.purpose} to {payload.destination_ref}",
             "deducted_batches": deducted_batches,
+        }
+
+
+@app.post("/check-in-bulk")
+def store_check_in_bulk(payload: BulkCheckInPayload):
+    """
+    Automated PO-driven Material Check-In (GRN Inward):
+    Receives all line items from an approved Purchase Order,
+    creates FEFO-tracked stock batches, records inward movements,
+    and attaches optional vendor invoice data.
+    """
+    with get_conn() as conn:
+        created_batches = []
+        created_movements = []
+        total_inward_val = 0.0
+
+        for it in payload.items:
+            item_row = conn.execute("SELECT name, category, inventory_uom FROM admin_mod.items WHERE sku = %s", (it.sku,)).fetchone()
+            item_name = it.item_name or (item_row["name"] if item_row else it.sku)
+            category = it.category or (item_row["category"] if item_row else "Raw Material")
+            uom = it.uom or (item_row["inventory_uom"] if item_row else "kg")
+
+            ts = int(datetime.now().timestamp() * 1000) % 1000000
+            batch_no = it.batch_no or f"BAT-{payload.store_code}-{ts}-{it.sku[-4:]}"
+            mfg = date.today()
+            exp = date.fromtimestamp(datetime.now().timestamp() + (it.expiry_days or 90) * 86400)
+
+            batch = conn.execute(
+                """
+                INSERT INTO stores_mod.stock_batches
+                (store_code, sku, item_name, category, batch_no, qty, uom, unit_cost, mfg_date, expiry_date, qc_status, source_ref)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING *
+                """,
+                (
+                    payload.store_code, it.sku, item_name, category,
+                    batch_no, it.qty, uom, it.unit_cost,
+                    mfg, exp, "PASSED", f"PO:{payload.po_no}",
+                ),
+            ).fetchone()
+
+            mov_no = f"INW-{ts}"
+            conn.execute(
+                """
+                INSERT INTO stores_mod.stock_movements
+                (movement_no, movement_type, store_code, sku, batch_no, qty, uom, reason_code, ref_no, actor)
+                VALUES (%s,'CHECK_IN_GRN',%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    mov_no, payload.store_code, it.sku, batch_no, it.qty, uom,
+                    f"PO {payload.po_no} Inward ({payload.vendor_name})",
+                    f"Inv: {payload.invoice_no or 'N/A'}", payload.actor
+                ),
+            )
+            created_batches.append(batch)
+            created_movements.append(mov_no)
+            total_inward_val += float(it.qty) * float(it.unit_cost)
+
+        # Update purchase order status and invoice if present
+        if payload.po_no:
+            match_status = "MATCHED" if payload.invoice_no else "PENDING"
+            notes = f"Stores Check-In completed on {payload.check_in_date or date.today()} at {payload.check_in_time or 'N/A'} by {payload.actor}. Total Inward Batches: {len(created_batches)}."
+            conn.execute(
+                """
+                UPDATE vendor_mod.purchase_orders
+                SET status = 'INWARDED',
+                    invoice_no = COALESCE(%s, invoice_no),
+                    invoice_amount = COALESCE(%s, invoice_amount),
+                    three_way_match_status = %s,
+                    qc_notes = COALESCE(qc_notes, '') || E'\n' || %s
+                WHERE po_no = %s
+                """,
+                (
+                    payload.invoice_no,
+                    payload.invoice_amount or total_inward_val,
+                    match_status,
+                    notes,
+                    payload.po_no,
+                ),
+            )
+
+        return {
+            "success": True,
+            "message": f"Successfully checked-in {len(created_batches)} line items from PO {payload.po_no} into {payload.store_code}",
+            "batches_created": len(created_batches),
+            "total_value": round(total_inward_val, 2),
+            "batches": created_batches,
+        }
+
+
+@app.post("/check-out-bulk")
+def store_check_out_bulk(payload: BulkCheckOutPayload):
+    """
+    Automated Order/BOM-driven Material Check-Out (Factory to Floor):
+    Deducts all required BOM raw materials from store inventory using FEFO,
+    generating departmental issue movement logs for factory preparation.
+    """
+    with get_conn() as conn:
+        issued_items = []
+        for it in payload.items:
+            batches = conn.execute(
+                """
+                SELECT * FROM stores_mod.stock_batches
+                WHERE store_code = %s AND sku = %s AND qty > 0 AND qc_status = 'PASSED'
+                ORDER BY expiry_date ASC, id ASC
+                """,
+                (payload.store_code, it.sku),
+            ).fetchall()
+
+            total_avail = sum(float(b["qty"]) for b in batches)
+            if total_avail < it.qty:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient store stock for {it.item_name or it.sku}: Available {total_avail} {it.uom}, Required {it.qty} {it.uom}"
+                )
+
+            rem_qty = it.qty
+            for b in batches:
+                if rem_qty <= 0:
+                    break
+                take = min(float(b["qty"]), rem_qty)
+                conn.execute("UPDATE stores_mod.stock_batches SET qty = qty - %s WHERE id = %s", (take, b["id"]))
+                ts = int(datetime.now().timestamp() * 1000) % 1000000
+                mov_no = f"OUT-{ts}-{b['id']}"
+                conn.execute(
+                    """
+                    INSERT INTO stores_mod.stock_movements
+                    (movement_no, movement_type, store_code, sku, batch_no, qty, uom, reason_code, ref_no, actor)
+                    VALUES (%s,'CHECK_OUT_ISSUE',%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (
+                        mov_no, b["store_code"], b["sku"], b["batch_no"], take, b["uom"],
+                        f"Order {payload.order_no} ({payload.order_type})",
+                        payload.destination_ref, payload.actor
+                    ),
+                )
+                rem_qty -= take
+
+            issued_items.append({"sku": it.sku, "name": it.item_name, "qty": it.qty, "uom": it.uom})
+
+        return {
+            "success": True,
+            "message": f"Successfully checked-out {len(issued_items)} BOM items for Order {payload.order_no} to {payload.destination_ref}",
+            "issued_items": issued_items,
         }
 
 

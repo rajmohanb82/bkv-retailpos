@@ -79,6 +79,7 @@ CREATE TABLE admin_mod.items (
     is_loose_weighed BOOLEAN DEFAULT FALSE,
     default_tare_grams NUMERIC(8,2) DEFAULT 0,
     kitchen_station VARCHAR(40),
+    image_url TEXT,
     active BOOLEAN DEFAULT TRUE
 );
 

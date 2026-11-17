@@ -1,0 +1,34 @@
+# ==============================================================================
+# Render Blueprint — Annavya Food Retail Chain ERP (Bikanervala Edition)
+# Free Tier Optimized Single-Container Architecture (512MB RAM Compatible)
+# ==============================================================================
+
+services:
+  - type: web
+    name: bikanervala-retail-erp
+    runtime: docker
+    dockerfilePath: ./render/Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 10000
+      # If using external DB (Supabase, Neon, or Render Managed PostgreSQL):
+      # - key: DATABASE_URL
+      #   value: postgresql://username:password@hostname:5432/database_name
+      #
+      # Note: When DATABASE_URL is omitted, the container automatically spawns
+      # and initializes an embedded PostgreSQL 16 server with full seed data!
+
+# Optional: If you want to use Render's managed Free PostgreSQL (expires in 30 days),
+# uncomment the database block below and set fromDatabase in envVars:
+#
+# databases:
+#   - name: bikanervala-postgres
+#     databaseName: annavya_erp
+#     user: annavya
+#     plan: free
+#     region: oregon

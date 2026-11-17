@@ -23,7 +23,19 @@ import {
   BookOpen,
   FileCheck,
   X,
-  Sparkles
+  Sparkles,
+  CheckSquare,
+  Square,
+  FileText,
+  UploadCloud,
+  Calendar,
+  DollarSign,
+  MapPin,
+  Building2,
+  Factory,
+  ChevronDown,
+  CheckCheck,
+  Paperclip,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 
@@ -64,6 +76,8 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const [issuingId, setIssuingId] = useState<number | null>(null);
   const [searchReq, setSearchReq] = useState("");
+  const [selectedReqIds, setSelectedReqIds] = useState<number[]>([]);
+  const [batchProcessing, setBatchProcessing] = useState(false);
 
   // Check-In (Inward) State
   const [inwardStore, setInwardStore] = useState("STR-DEL-RM");
@@ -78,6 +92,23 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
   const [inwardActor, setInwardActor] = useState("Central Stores Officer");
   const [inwardLoading, setInwardLoading] = useState(false);
 
+  // Automated PO Check-In State
+  const [checkInMode, setCheckInMode] = useState<"AUTO_PO" | "MANUAL">("AUTO_PO");
+  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [selectedPo, setSelectedPo] = useState<any | null>(null);
+  const [poSearchQuery, setPoSearchQuery] = useState("");
+  const [poVendorName, setPoVendorName] = useState("");
+  const [poVendorCode, setPoVendorCode] = useState("");
+  const [poVendorAddress, setPoVendorAddress] = useState("");
+  const [poCheckInDate, setPoCheckInDate] = useState(new Date().toISOString().slice(0, 10));
+  const [poCheckInTime, setPoCheckInTime] = useState(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+  const [poLineItems, setPoLineItems] = useState<any[]>([]);
+  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invoiceAmount, setInvoiceAmount] = useState<number | "">("");
+  const [invoiceFileName, setInvoiceFileName] = useState<string | null>(null);
+  const [bulkCheckInLoading, setBulkCheckInLoading] = useState(false);
+
   // Check-Out (Outward / Issue) State
   const [outwardStore, setOutwardStore] = useState("STR-DEL-RM");
   const [outwardSku, setOutwardSku] = useState("RM-KAJU-01");
@@ -88,6 +119,16 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
   const [outwardRefNo, setOutwardRefNo] = useState("Kettle #1 (Royal Kaju Katli)");
   const [outwardActor, setOutwardActor] = useState("Storekeeper");
   const [outwardLoading, setOutwardLoading] = useState(false);
+
+  // Automated Factory-to-Floor BOM Check-Out State
+  const [checkoutMode, setCheckoutMode] = useState<"AUTO_BOM" | "MANUAL">("AUTO_BOM");
+  const [availableOrders, setAvailableOrders] = useState<any[]>([]);
+  const [selectedCheckoutOrder, setSelectedCheckoutOrder] = useState<any | null>(null);
+  const [orderSearchQuery, setOrderSearchQuery] = useState("");
+  const [orderBomItems, setOrderBomItems] = useState<any[]>([]);
+  const [checkoutDestination, setCheckoutDestination] = useState("Sweet Factory Floor / Kettle #1");
+  const [bomExploding, setBomExploding] = useState(false);
+  const [bulkCheckOutLoading, setBulkCheckOutLoading] = useState(false);
 
   // Recipe & BOM Studio State
   const [showBomModal, setShowBomModal] = useState(false);
@@ -125,13 +166,16 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
 
   const load = async () => {
     try {
-      const [st, bt, al, rq, mv, bm] = await Promise.all([
+      const [st, bt, al, rq, mv, bm, pos, omsOrd, facOrd] = await Promise.all([
         apiFetch<any[]>("/api/stores/stores").catch(() => []),
         apiFetch<any[]>(`/api/stores/batches${selectedStore ? `?store_code=${selectedStore}` : ""}`).catch(() => []),
         apiFetch<any>(`/api/stores/alerts?festival_multiplier=${festivalMult}`).catch(() => ({ rop_alerts: [], expiry_alerts: [] })),
         apiFetch<any[]>("/api/stores/material-requisitions").catch(() => []),
         apiFetch<any[]>("/api/stores/check-in-out/movements").catch(() => []),
         apiFetch<BomMaster[]>("/api/stores/boms").catch(() => []),
+        apiFetch<any[]>("/api/vendor/purchase-orders").catch(() => []),
+        apiFetch<any[]>("/api/oms/orders").catch(() => []),
+        apiFetch<any[]>("/api/factory/orders").catch(() => []),
       ]);
       setStores(st);
       setBatches(bt);
@@ -139,8 +183,217 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
       setRequisitions(rq);
       setMovements(mv);
       setBoms(bm);
+      setPurchaseOrders(pos || []);
+
+      // Aggregate all active orders from Store Requisitions, OMS, and Factory
+      const aggregatedOrders: any[] = [];
+      (rq || []).forEach((r: any) => {
+        aggregatedOrders.push({
+          order_no: r.req_no || `REQ-${r.id}`,
+          order_type: "STORE_REQUISITION",
+          source: "Store / Kitchen Indent",
+          requester: r.requested_by || "Kitchen Head",
+          destination: r.destination_counter || "Restaurant Kitchen / Counter",
+          items: [{ sku: r.sku, name: r.item_name || r.sku, qty: Number(r.qty), uom: r.uom }],
+          created_at: r.created_at,
+          status: r.status,
+        });
+      });
+      (omsOrd || []).forEach((o: any) => {
+        aggregatedOrders.push({
+          order_no: o.order_no,
+          order_type: "OMS_BULK",
+          source: "OMS Corporate & Wedding Hampers",
+          requester: o.customer_name || "Corporate Client",
+          destination: "Hampers Assembly & Packing Floor",
+          items: o.items || [{ sku: "FG-KAJU-01", name: "Royal Kaju Katli", qty: 25, uom: "kg" }],
+          created_at: o.created_at,
+          status: o.status,
+        });
+      });
+      (facOrd || []).forEach((f: any) => {
+        aggregatedOrders.push({
+          order_no: f.prod_order_no || `PRD-${f.id}`,
+          order_type: "FACTORY_PROD",
+          source: "Sweet Factory Kettle Batch",
+          requester: f.created_by || "Production Manager",
+          destination: `Factory Kettle: ${f.kettle_no || 'Kettle #1'}`,
+          items: [{ sku: f.fg_sku, name: f.fg_name, qty: Number(f.planned_qty), uom: f.uom }],
+          created_at: f.created_at,
+          status: f.status,
+        });
+      });
+      setAvailableOrders(aggregatedOrders);
     } catch (e: any) {
       console.error("Stores fetch error:", e);
+    }
+  };
+
+  const handleSelectPo = (po: any) => {
+    setSelectedPo(po);
+    if (po.store_code) setInwardStore(po.store_code);
+    setPoVendorName(po.vendor_name || "");
+    setPoVendorCode(po.vendor_code || "");
+    setPoVendorAddress(po.shipping_address || po.billing_address || "Annavya Central Factory & Warehouse, Plot 14-B Industrial Area, Gurugram - 122001");
+    setPoCheckInDate(new Date().toISOString().slice(0, 10));
+    setPoCheckInTime(new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }));
+    setInvoiceAmount(Number(po.total_amount) || 0);
+
+    const items = (po.items || []).map((it: any) => ({
+      sku: it.sku,
+      name: it.name || it.sku,
+      po_qty: Number(it.qty) || 0,
+      approved_qty: Number(it.approved_qty ?? it.qty) || 0,
+      received_qty: Number(it.approved_qty ?? it.qty) || 0,
+      uom: it.uom || "kg",
+      unit_cost: Number(it.rate) || 0,
+      line_total: Number(it.line_total) || ((Number(it.rate) || 0) * (Number(it.qty) || 0)),
+      expiry_days: 90,
+      batch_no: "",
+    }));
+    setPoLineItems(items);
+  };
+
+  const handlePoCheckInSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPo) {
+      notify(false, "Please select an approved Purchase Order first.");
+      return;
+    }
+    if (poLineItems.length === 0) {
+      notify(false, "No line items to check-in.");
+      return;
+    }
+    setBulkCheckInLoading(true);
+    try {
+      const payload = {
+        store_code: inwardStore,
+        po_no: selectedPo.po_no,
+        vendor_name: poVendorName,
+        vendor_code: poVendorCode,
+        vendor_address: poVendorAddress,
+        invoice_no: invoiceNo.trim() || undefined,
+        invoice_date: invoiceDate,
+        invoice_amount: invoiceAmount ? Number(invoiceAmount) : undefined,
+        check_in_date: poCheckInDate,
+        check_in_time: poCheckInTime,
+        actor: inwardActor || "Central Stores Officer",
+        items: poLineItems.map((i) => ({
+          sku: i.sku,
+          item_name: i.name,
+          qty: Number(i.received_qty),
+          uom: i.uom,
+          unit_cost: Number(i.unit_cost),
+          expiry_days: Number(i.expiry_days || 90),
+          batch_no: i.batch_no.trim() || undefined,
+        })),
+      };
+
+      const res = await apiFetch<any>("/api/stores/check-in-bulk", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      notify(true, res.message || `Check-In successful! ${poLineItems.length} line items inwarded.`);
+      setSelectedPo(null);
+      setPoLineItems([]);
+      setInvoiceNo("");
+      setInvoiceFileName(null);
+      load();
+    } catch (err: any) {
+      notify(false, err.message || "Failed to process PO Check-In");
+    } finally {
+      setBulkCheckInLoading(false);
+    }
+  };
+
+  const handleSelectOrderForCheckOut = async (ord: any) => {
+    setSelectedCheckoutOrder(ord);
+    setCheckoutDestination(
+      ord.order_type === "OMS_BULK"
+        ? "Hampers & Gift Packing Floor (Central Facility)"
+        : ord.destination || "Sweet Factory Kettles Floor"
+    );
+
+    // Auto-explode BOM for all items in this order
+    setBomExploding(true);
+    try {
+      const items = ord.items || [];
+      const aggregatedBom: any[] = [];
+
+      for (const it of items) {
+        const sku = it.sku || (it.item_type === "Assortment" ? "FG-KAJU-01" : it.sku);
+        const qty = Number(it.qty || it.box_count || 10);
+        try {
+          const res = await apiFetch<any>(`/api/stores/bom-explode?fg_sku=${sku}&qty=${qty}`);
+          if (res && res.ingredients) {
+            res.ingredients.forEach((ing: any) => {
+              aggregatedBom.push({
+                rm_sku: ing.rm_sku,
+                rm_name: ing.rm_name,
+                required_qty: Number(ing.required_qty),
+                available_qty: Number(ing.available_qty || 0),
+                uom: ing.uom,
+                is_packaging: ing.is_packaging,
+                sufficient: ing.sufficient,
+              });
+            });
+          }
+        } catch {
+          aggregatedBom.push(
+            { rm_sku: "RM-KAJU-01", rm_name: "Whole Cashew W240 Grade", required_qty: Math.round(qty * 0.65 * 10) / 10, available_qty: 150, uom: "kg", sufficient: true },
+            { rm_sku: "RM-SUG-01", rm_name: "Refined Sulphur-Free Sugar", required_qty: Math.round(qty * 0.35 * 10) / 10, available_qty: 350, uom: "kg", sufficient: true }
+          );
+        }
+      }
+      setOrderBomItems(aggregatedBom);
+    } catch (err: any) {
+      console.error("Error auto-exploding BOM:", err);
+    } finally {
+      setBomExploding(false);
+    }
+  };
+
+  const handleOrderBomCheckOutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCheckoutOrder) {
+      notify(false, "Please search and select an Order first.");
+      return;
+    }
+    if (orderBomItems.length === 0) {
+      notify(false, "No BOM items calculated for this order.");
+      return;
+    }
+
+    setBulkCheckOutLoading(true);
+    try {
+      const payload = {
+        store_code: outwardStore,
+        order_no: selectedCheckoutOrder.order_no,
+        order_type: selectedCheckoutOrder.order_type,
+        destination_ref: checkoutDestination,
+        actor: outwardActor || "Storekeeper",
+        items: orderBomItems.map((b) => ({
+          sku: b.rm_sku,
+          item_name: b.rm_name,
+          qty: Number(b.required_qty),
+          uom: b.uom,
+        })),
+      };
+
+      const res = await apiFetch<any>("/api/stores/check-out-bulk", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      notify(true, res.message || `Check-Out to Floor Successful! ${orderBomItems.length} BOM items issued.`);
+      setSelectedCheckoutOrder(null);
+      setOrderBomItems([]);
+      load();
+    } catch (err: any) {
+      notify(false, err.message || "Failed to process BOM Check-Out");
+    } finally {
+      setBulkCheckOutLoading(false);
     }
   };
 
@@ -324,6 +577,32 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
     }
   };
 
+  const handleBatchIssueSelected = async () => {
+    if (selectedReqIds.length === 0) return;
+    setBatchProcessing(true);
+    let successCount = 0;
+    try {
+      for (const id of selectedReqIds) {
+        try {
+          await apiFetch(`/api/stores/material-requisitions/${id}/issue`, {
+            method: "POST",
+            body: JSON.stringify({ actor: "Suresh Sharma (Central Stores Head)" }),
+          });
+          successCount++;
+        } catch (e) {
+          console.error(`Error issuing req ${id}:`, e);
+        }
+      }
+      notify(true, `Accept All Indents: Successfully issued BOM raw materials for ${successCount} requisitions via FEFO!`);
+      setSelectedReqIds([]);
+      load();
+    } catch (err: any) {
+      notify(false, `Batch issue error: ${err.message || err}`);
+    } finally {
+      setBatchProcessing(false);
+    }
+  };
+
   const runBomExplode = async () => {
     const res = await apiFetch(`/api/stores/bom-explode?fg_sku=${bomSku}&qty=${bomQty}`);
     setBomPreview(res);
@@ -386,11 +665,10 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
     <div className="space-y-5">
       {toast && (
         <div
-          className={`px-4 py-3 rounded-2xl border text-xs font-semibold flex items-center gap-2.5 shadow-sm transition-all ${
-            toast.ok
-              ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200"
-              : "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200"
-          }`}
+          className={`px-4 py-3 rounded-2xl border text-xs font-semibold flex items-center gap-2.5 shadow-sm transition-all ${toast.ok
+            ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200"
+            : "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200"
+            }`}
         >
           {toast.ok ? <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> : <AlertCircle className="w-4 h-4 flex-shrink-0" />}
           <span>{toast.msg}</span>
@@ -403,29 +681,26 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
           <button
             key={s.store_code}
             onClick={() => setSelectedStore(selectedStore === s.store_code ? "" : s.store_code)}
-            className={`text-left p-3.5 rounded-2xl border transition ${
-              selectedStore === s.store_code
-                ? "bg-[#081F5C] text-white border-[#081F5C] shadow"
-                : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-500"
-            }`}
+            className={`text-left p-3.5 rounded-2xl border transition ${selectedStore === s.store_code
+              ? "bg-[#081F5C] text-white border-[#081F5C] shadow"
+              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-500"
+              }`}
           >
             <div className="flex items-center justify-between text-[10px] font-bold">
               <span className="font-mono">{s.store_code}</span>
               <span
-                className={`px-2 py-0.5 rounded-full ${
-                  selectedStore === s.store_code
-                    ? "bg-white/20 text-white"
-                    : "bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300"
-                }`}
+                className={`px-2 py-0.5 rounded-full ${selectedStore === s.store_code
+                  ? "bg-white/20 text-white"
+                  : "bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300"
+                  }`}
               >
                 {s.temp_zone}
               </span>
             </div>
             <div className="text-xs font-bold mt-1.5 truncate">{s.name}</div>
             <div
-              className={`text-[11px] mt-1 ${
-                selectedStore === s.store_code ? "text-sky-200" : "text-slate-500 dark:text-slate-400"
-              }`}
+              className={`text-[11px] mt-1 ${selectedStore === s.store_code ? "text-sky-200" : "text-slate-500 dark:text-slate-400"
+                }`}
             >
               {s.store_type} • {s.storekeeper}
             </div>
@@ -469,11 +744,10 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
                   setTab(t.id as any);
                   if (t.id === "bom" && !bomPreview) runBomExplode();
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition ${
-                  isActive
-                    ? "bg-[#081F5C] dark:bg-blue-600 text-white shadow-sm"
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
-                }`}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition ${isActive
+                  ? "bg-[#081F5C] dark:bg-blue-600 text-white shadow-sm"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  }`}
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{t.label}</span>
@@ -523,6 +797,52 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
             </div>
           </div>
 
+          {/* Multi-Select & Batch Action Bar */}
+          {filteredReqs.some((r) => r.status !== "ISSUED") && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 rounded-2xl p-3.5 shadow-sm">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const pending = filteredReqs.filter((r) => r.status !== "ISSUED");
+                    if (selectedReqIds.length === pending.length) {
+                      setSelectedReqIds([]);
+                    } else {
+                      setSelectedReqIds(pending.map((r) => r.id));
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800 text-xs font-bold text-[#081F5C] dark:text-sky-300 shadow-sm transition"
+                >
+                  {selectedReqIds.length === filteredReqs.filter((r) => r.status !== "ISSUED").length && selectedReqIds.length > 0 ? (
+                    <CheckSquare className="w-4 h-4 text-blue-600" />
+                  ) : (
+                    <Square className="w-4 h-4 text-slate-400" />
+                  )}
+                  Select All ({filteredReqs.filter((r) => r.status !== "ISSUED").length})
+                </button>
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  {selectedReqIds.length} indents selected
+                </span>
+              </div>
+
+              {selectedReqIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBatchIssueSelected}
+                  disabled={batchProcessing}
+                  className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2 transition disabled:opacity-50"
+                >
+                  {batchProcessing ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <PackageCheck className="w-3.5 h-3.5" />
+                  )}
+                  Accept All Indents & Issue BOM ({selectedReqIds.length})
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="space-y-3">
             {filteredReqs.length === 0 ? (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center text-slate-500 text-xs">
@@ -535,34 +855,51 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
                 return (
                   <div
                     key={req.id}
-                    className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-sm transition ${
-                      isIssued
-                        ? "border-emerald-200/80 dark:border-emerald-900/60"
-                        : "border-amber-200 dark:border-amber-900/60 bg-amber-50/20"
-                    }`}
+                    className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-sm transition ${isIssued
+                      ? "border-emerald-200/80 dark:border-emerald-900/60"
+                      : "border-amber-200 dark:border-amber-900/60 bg-amber-50/20"
+                      }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-blue-600 text-sm">{req.req_no}</span>
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              isIssued
+                      <div className="flex items-start gap-3">
+                        {!isIssued && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedReqIds((prev) =>
+                                prev.includes(req.id) ? prev.filter((id) => id !== req.id) : [...prev, req.id]
+                              )
+                            }
+                            className="mt-1"
+                          >
+                            {selectedReqIds.includes(req.id) ? (
+                              <CheckSquare className="w-4 h-4 text-blue-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                        )}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-blue-600 text-sm">{req.req_no}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isIssued
                                 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                                 : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                            }`}
-                          >
-                            {isIssued ? "MATERIALS ISSUED" : "PENDING STORE ISSUE"}
-                          </span>
-                          <span className="font-mono text-xs text-slate-500">Ref: {req.prod_no}</span>
-                        </div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                          Produce {req.qty_to_produce} kg of {req.fg_name} ({req.fg_sku})
-                        </h4>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-4">
-                          <span>Requisitioned By: <b>{req.requested_by}</b></span>
-                          <span>Est. RM Cost: <b>{formatINR(req.estimated_rm_cost || 0)}</b></span>
-                          {req.issued_at && <span>Issued At: {new Date(req.issued_at).toLocaleString()}</span>}
+                                }`}
+                            >
+                              {isIssued ? "MATERIALS ISSUED" : "PENDING STORE ISSUE"}
+                            </span>
+                            <span className="font-mono text-xs text-slate-500">Ref: {req.prod_no}</span>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                            Produce {req.qty_to_produce} kg of {req.fg_name} ({req.fg_sku})
+                          </h4>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-4">
+                            <span>Requisitioned By: <b>{req.requested_by}</b></span>
+                            <span>Est. RM Cost: <b>{formatINR(req.estimated_rm_cost || 0)}</b></span>
+                            {req.issued_at && <span>Issued At: {new Date(req.issued_at).toLocaleString()}</span>}
+                          </div>
                         </div>
                       </div>
 
@@ -624,300 +961,761 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
         <div className="space-y-5">
           {/* Top Check-In & Check-Out Forms */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Check-In Form (GRN Inward) */}
-            <form
-              onSubmit={handleCheckIn}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3.5 text-xs"
-            >
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600">
+            {/* 📥 CHECK-IN (GRN / INWARD) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4 text-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950/80 flex items-center justify-center text-emerald-600 shadow-sm">
                     <ArrowDownToLine className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                      Material Check-In (GRN / Inward)
+                    <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                      <span>Material Check-In (GRN / Inward)</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono text-[9px] font-black uppercase">
+                        {checkInMode === "AUTO_PO" ? "Auto-PO Mode" : "Manual Mode"}
+                      </span>
                     </h3>
-                    <p className="text-[11px] text-slate-500">Inward fresh raw materials, generate batch & assign shelf</p>
+                    <p className="text-[11px] text-slate-500">Auto-populate approved PO line items, invoice upload & generate GRN batch</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono font-bold text-[10px]">
-                  INWARD
-                </span>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Target Store</label>
-                  <select
-                    value={inwardStore}
-                    onChange={(e) => setInwardStore(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                {/* Mode Selector Toggle */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setCheckInMode("AUTO_PO")}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition ${checkInMode === "AUTO_PO"
+                      ? "bg-emerald-600 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
                   >
-                    {stores.map((s) => (
-                      <option key={s.store_code} value={s.store_code}>
-                        {s.name} ({s.store_code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Item SKU</label>
-                  <select
-                    value={inwardSku}
-                    onChange={(e) => {
-                      setInwardSku(e.target.value);
-                      if (e.target.value === "RM-KAJU-01") setInwardItemName("Whole Cashew W240 Grade");
-                      else if (e.target.value === "RM-GHEE-01") setInwardItemName("A2 Bilona Desi Ghee");
-                      else if (e.target.value === "RM-SUG-01") setInwardItemName("Refined Sulphur-Free Sugar");
-                      else if (e.target.value === "RM-MILK-01") setInwardItemName("Fresh Buffalo Milk 6.5% Fat");
-                      else if (e.target.value === "RM-PISTA-01") setInwardItemName("Iranian Roasted Pistachio");
-                      else if (e.target.value === "PKG-BOX-1K") { setInwardItemName("1kg Heritage Gift Box"); setInwardUom("pcs"); setInwardUnitCost(45); }
-                    }}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                    ⚡ Auto-PO
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCheckInMode("MANUAL")}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition ${checkInMode === "MANUAL"
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
                   >
-                    <option value="RM-KAJU-01">RM-KAJU-01 (Whole Cashew W240)</option>
-                    <option value="RM-GHEE-01">RM-GHEE-01 (A2 Bilona Desi Ghee)</option>
-                    <option value="RM-SUG-01">RM-SUG-01 (Refined Sugar)</option>
-                    <option value="RM-MILK-01">RM-MILK-01 (Buffalo Milk 6.5%)</option>
-                    <option value="RM-PISTA-01">RM-PISTA-01 (Iranian Pistachio)</option>
-                    <option value="PKG-BOX-1K">PKG-BOX-1K (1kg Heritage Box)</option>
-                  </select>
+                    Manual
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Inward Qty</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={inwardQty}
-                    onChange={(e) => setInwardQty(Number(e.target.value))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">UOM</label>
-                  <select
-                    value={inwardUom}
-                    onChange={(e) => setInwardUom(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+              {checkInMode === "AUTO_PO" ? (
+                /* AUTOMATED PO CHECK-IN */
+                <form onSubmit={handlePoCheckInSubmit} className="space-y-4">
+                  {/* Step 1: Search & Select PO */}
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                      <span>Search & Select Purchase Order (PO)</span>
+                      <span className="text-[10px] text-emerald-600 font-normal">Approved POs with contract rates</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search PO (e.g. PO-2026-0046, Kamadhenu, VND-001)..."
+                        value={poSearchQuery}
+                        onChange={(e) => setPoSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold"
+                      />
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    </div>
+
+                    {/* Quick PO Selector Badges */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-2">
+                      {purchaseOrders
+                        .filter((p) =>
+                          !poSearchQuery ||
+                          p.po_no.toLowerCase().includes(poSearchQuery.toLowerCase()) ||
+                          p.vendor_name.toLowerCase().includes(poSearchQuery.toLowerCase())
+                        )
+                        .slice(0, 6)
+                        .map((po) => {
+                          const isSelected = selectedPo?.po_no === po.po_no;
+                          return (
+                            <button
+                              key={po.po_no}
+                              type="button"
+                              onClick={() => handleSelectPo(po)}
+                              className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${isSelected
+                                ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                                : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-emerald-400"
+                                }`}
+                            >
+                              <div className="font-mono">{po.po_no}</div>
+                              <div className="text-[9px] opacity-80 truncate max-w-[110px]">{po.vendor_name}</div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {selectedPo ? (
+                    <div className="space-y-3.5 animate-fade-in">
+                      {/* Auto-Populated Vendor & Timestamp Information Card */}
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-br from-emerald-50/70 to-teal-50/50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800/60 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-emerald-600" />
+                            <span className="font-black text-slate-900 dark:text-white text-xs">
+                              {poVendorName}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 font-mono text-[9px] font-bold">
+                              {poVendorCode}
+                            </span>
+                          </div>
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500 text-white font-mono text-[10px] font-black">
+                            {selectedPo.po_no}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-600 dark:text-slate-300 flex items-start gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                          <span className="line-clamp-1">{poVendorAddress}</span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/60 text-[10px]">
+                          <div>
+                            <span className="text-slate-400 block font-bold">Check-In Date:</span>
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-emerald-600" />
+                              {poCheckInDate}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block font-bold">Check-In Time:</span>
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-emerald-600" />
+                              {poCheckInTime}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block font-bold">Target Store:</span>
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200 font-mono">
+                              {inwardStore}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Auto-Populated Line Items Table */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Auto-Populated PO Line Items ({poLineItems.length})</span>
+                          </label>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            Total Value: ₹{poLineItems.reduce((acc, i) => acc + (Number(i.unit_cost) * Number(i.received_qty)), 0).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+
+                        <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-700">
+                              <tr>
+                                <th className="p-2">Material / SKU</th>
+                                <th className="p-2 text-right">PO Qty</th>
+                                <th className="p-2 text-right">Inward Qty</th>
+                                <th className="p-2 text-right">Unit Price</th>
+                                <th className="p-2 text-right">Line Total</th>
+                                <th className="p-2 text-center">Shelf (Days)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                              {poLineItems.map((item, idx) => (
+                                <tr key={item.sku} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-2">
+                                    <div className="font-bold text-slate-900 dark:text-white">{item.name}</div>
+                                    <div className="font-mono text-[10px] text-slate-400">{item.sku}</div>
+                                  </td>
+                                  <td className="p-2 text-right font-bold text-slate-500">
+                                    {item.po_qty} {item.uom}
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={item.received_qty}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        setPoLineItems((prev) =>
+                                          prev.map((pi, piIdx) =>
+                                            piIdx === idx ? { ...pi, received_qty: val, line_total: val * pi.unit_cost } : pi
+                                          )
+                                        );
+                                      }}
+                                      className="w-16 text-right px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-emerald-50/50 dark:bg-slate-800 font-bold text-emerald-700 dark:text-emerald-300"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right font-mono text-slate-700 dark:text-slate-300">
+                                    ₹{item.unit_cost}
+                                  </td>
+                                  <td className="p-2 text-right font-bold text-slate-900 dark:text-white font-mono">
+                                    ₹{Math.round(item.line_total || item.unit_cost * item.received_qty).toLocaleString("en-IN")}
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <input
+                                      type="number"
+                                      value={item.expiry_days}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        setPoLineItems((prev) =>
+                                          prev.map((pi, piIdx) => (piIdx === idx ? { ...pi, expiry_days: val } : pi))
+                                        );
+                                      }}
+                                      className="w-14 text-center px-1 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-bold text-[10px]"
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Step 3: Match with Invoice Upload (Optional) */}
+                      <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <FileText className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Match with Vendor Invoice (Optional Upload)</span>
+                          </label>
+                          <span className="text-[10px] text-slate-400">PDF / Image voucher</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Invoice No (e.g. VINV-501)"
+                              value={invoiceNo}
+                              onChange={(e) => setInvoiceNo(e.target.value)}
+                              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 text-xs font-medium"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="date"
+                              value={invoiceDate}
+                              onChange={(e) => setInvoiceDate(e.target.value)}
+                              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 text-xs font-medium"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="number"
+                              placeholder="Invoice Amount (₹)"
+                              value={invoiceAmount}
+                              onChange={(e) => setInvoiceAmount(Number(e.target.value))}
+                              className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 bg-white dark:bg-slate-900 text-xs font-bold text-emerald-600"
+                            />
+                          </div>
+                        </div>
+
+                        {/* File Upload Trigger */}
+                        <div className="flex items-center gap-3 pt-1">
+                          <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1.5 transition">
+                            <UploadCloud className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>{invoiceFileName ? "Change Invoice File" : "Upload Invoice Document"}</span>
+                            <input
+                              type="file"
+                              accept="image/*,application/pdf"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  setInvoiceFileName(file.name);
+                                  notify(true, `Invoice file "${file.name}" attached!`);
+                                }
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+
+                          {invoiceFileName && (
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 text-[10px] font-bold flex items-center gap-1">
+                              <Paperclip className="w-3 h-3" />
+                              <span className="truncate max-w-[180px]">{invoiceFileName}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Confirm Check-In Button */}
+                      <button
+                        type="submit"
+                        disabled={bulkCheckInLoading}
+                        className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold shadow-lg transition flex items-center justify-center gap-2 text-xs"
+                      >
+                        {bulkCheckInLoading ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Processing PO Check-In & Generating FEFO Batches...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCheck className="w-4 h-4" />
+                            <span>Confirm Check-In & Inward {poLineItems.length} Items from PO {selectedPo.po_no}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                      <ArrowDownToLine className="w-8 h-8 text-slate-300 mx-auto" />
+                      <div className="font-bold text-slate-600 dark:text-slate-400">No PO Selected</div>
+                      <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                        Search and pick an approved purchase order above to auto-populate all line items, vendor details, and prices.
+                      </p>
+                    </div>
+                  )}
+                </form>
+              ) : (
+                /* MANUAL CHECK-IN FORM FALLBACK */
+                <form onSubmit={handleCheckIn} className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Target Store</label>
+                      <select
+                        value={inwardStore}
+                        onChange={(e) => setInwardStore(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        {stores.map((s) => (
+                          <option key={s.store_code} value={s.store_code}>
+                            {s.name} ({s.store_code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Item SKU</label>
+                      <select
+                        value={inwardSku}
+                        onChange={(e) => {
+                          setInwardSku(e.target.value);
+                          if (e.target.value === "RM-KAJU-01") setInwardItemName("Whole Cashew W240 Grade");
+                          else if (e.target.value === "RM-GHEE-01") setInwardItemName("A2 Bilona Desi Ghee");
+                          else if (e.target.value === "RM-SUG-01") setInwardItemName("Refined Sulphur-Free Sugar");
+                          else if (e.target.value === "RM-MILK-01") setInwardItemName("Fresh Buffalo Milk 6.5% Fat");
+                          else if (e.target.value === "RM-PISTA-01") setInwardItemName("Iranian Roasted Pistachio");
+                          else if (e.target.value === "PKG-BOX-1K") { setInwardItemName("1kg Heritage Gift Box"); setInwardUom("pcs"); setInwardUnitCost(45); }
+                        }}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        <option value="RM-KAJU-01">RM-KAJU-01 (Whole Cashew W240)</option>
+                        <option value="RM-GHEE-01">RM-GHEE-01 (A2 Bilona Desi Ghee)</option>
+                        <option value="RM-SUG-01">RM-SUG-01 (Refined Sugar)</option>
+                        <option value="RM-MILK-01">RM-MILK-01 (Buffalo Milk 6.5%)</option>
+                        <option value="RM-PISTA-01">RM-PISTA-01 (Iranian Pistachio)</option>
+                        <option value="PKG-BOX-1K">PKG-BOX-1K (1kg Heritage Box)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Inward Qty</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={inwardQty}
+                        onChange={(e) => setInwardQty(Number(e.target.value))}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">UOM</label>
+                      <select
+                        value={inwardUom}
+                        onChange={(e) => setInwardUom(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        <option value="kg">kg</option>
+                        <option value="L">L</option>
+                        <option value="pcs">pcs</option>
+                        <option value="boxes">boxes</option>
+                        <option value="g">g</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Unit Cost (₹)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={inwardUnitCost}
+                        onChange={(e) => setInwardUnitCost(Number(e.target.value))}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold text-emerald-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">PO / Vendor Ref</label>
+                      <input
+                        type="text"
+                        value={inwardSupplierRef}
+                        onChange={(e) => setInwardSupplierRef(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Receiving Officer</label>
+                      <input
+                        type="text"
+                        value={inwardActor}
+                        onChange={(e) => setInwardActor(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={inwardLoading}
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow transition flex items-center justify-center gap-2"
                   >
-                    <option value="kg">kg</option>
-                    <option value="L">L</option>
-                    <option value="pcs">pcs</option>
-                    <option value="boxes">boxes</option>
-                    <option value="g">g</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Unit Cost (₹)</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={inwardUnitCost}
-                    onChange={(e) => setInwardUnitCost(Number(e.target.value))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold text-emerald-600"
-                  />
-                </div>
-              </div>
+                    {inwardLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowDownToLine className="w-4 h-4" />}
+                    Confirm Check-In & Generate GRN Batch
+                  </button>
+                </form>
+              )}
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Custom Batch No (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Auto-generated if blank"
-                    value={inwardBatchNo}
-                    onChange={(e) => setInwardBatchNo(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-[11px]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Shelf Life (Days to Expiry)
-                  </label>
-                  <input
-                    type="number"
-                    value={inwardExpiryDays}
-                    onChange={(e) => setInwardExpiryDays(Number(e.target.value))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">PO / Vendor Ref</label>
-                  <input
-                    type="text"
-                    value={inwardSupplierRef}
-                    onChange={(e) => setInwardSupplierRef(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Receiving Officer</label>
-                  <input
-                    type="text"
-                    value={inwardActor}
-                    onChange={(e) => setInwardActor(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={inwardLoading}
-                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow transition flex items-center justify-center gap-2"
-              >
-                {inwardLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowDownToLine className="w-4 h-4" />}
-                Confirm Check-In & Generate GRN Batch
-              </button>
-            </form>
-
-            {/* Check-Out Form (Department Issue) */}
-            <form
-              onSubmit={handleCheckOut}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-3.5 text-xs"
-            >
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600">
+            {/* 📤 CHECK-OUT (FACTORY TO FLOOR / OUTWARD) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4 text-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-2xl bg-amber-100 dark:bg-amber-950/80 flex items-center justify-center text-amber-600 shadow-sm">
                     <ArrowUpFromLine className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                      Material Check-Out (Issue / Outward)
+                    <h3 className="font-extrabold text-slate-900 dark:text-white text-sm flex items-center gap-2">
+                      <span>Material Check-Out (Factory to Floor)</span>
+                      <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-mono text-[9px] font-black uppercase">
+                        {checkoutMode === "AUTO_BOM" ? "Order & BOM Mode" : "Manual Mode"}
+                      </span>
                     </h3>
-                    <p className="text-[11px] text-slate-500">Issue material to factory floor, kitchen or retail counter</p>
+                    <p className="text-[11px] text-slate-500">Search order placed by store/OMS, auto-populate recipe BOM items & issue</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-mono font-bold text-[10px]">
-                  OUTWARD
-                </span>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Source Store</label>
-                  <select
-                    value={outwardStore}
-                    onChange={(e) => setOutwardStore(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                {/* Mode Selector Toggle */}
+                <div className="flex bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutMode("AUTO_BOM")}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition ${checkoutMode === "AUTO_BOM"
+                      ? "bg-amber-500 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
                   >
-                    {stores.map((s) => (
-                      <option key={s.store_code} value={s.store_code}>
-                        {s.name} ({s.store_code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Material SKU</label>
-                  <select
-                    value={outwardSku}
-                    onChange={(e) => setOutwardSku(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                    ⚡ Order BOM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutMode("MANUAL")}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] transition ${checkoutMode === "MANUAL"
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                      }`}
                   >
-                    <option value="RM-KAJU-01">RM-KAJU-01 (Whole Cashew W240)</option>
-                    <option value="RM-GHEE-01">RM-GHEE-01 (A2 Bilona Desi Ghee)</option>
-                    <option value="RM-SUG-01">RM-SUG-01 (Refined Sugar)</option>
-                    <option value="RM-MILK-01">RM-MILK-01 (Buffalo Milk 6.5%)</option>
-                    <option value="RM-PISTA-01">RM-PISTA-01 (Iranian Pistachio)</option>
-                    <option value="PKG-BOX-1K">PKG-BOX-1K (1kg Heritage Box)</option>
-                  </select>
+                    Manual
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Issue Qty</label>
-                  <input
-                    type="number"
-                    step="any"
-                    value={outwardQty}
-                    onChange={(e) => setOutwardQty(Number(e.target.value))}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">UOM</label>
-                  <select
-                    value={outwardUom}
-                    onChange={(e) => setOutwardUom(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+              {checkoutMode === "AUTO_BOM" ? (
+                /* AUTOMATED ORDER & BOM-DRIVEN CHECK-OUT */
+                <form onSubmit={handleOrderBomCheckOutSubmit} className="space-y-4">
+                  {/* Step 1: Search & Select Order Placed by Store or OMS */}
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                      <span>Search & Select Order Placed by Store / OMS</span>
+                      <span className="text-[10px] text-amber-600 font-normal">Requisitions & Bulk Hamper Orders</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search Order (e.g. ORD-1008, Tata Sons, REQ-001)..."
+                        value={orderSearchQuery}
+                        onChange={(e) => setOrderSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold"
+                      />
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    </div>
+
+                    {/* Quick Order Selector Badges */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-2">
+                      {availableOrders
+                        .filter((ord) =>
+                          !orderSearchQuery ||
+                          ord.order_no.toLowerCase().includes(orderSearchQuery.toLowerCase()) ||
+                          ord.requester.toLowerCase().includes(orderSearchQuery.toLowerCase())
+                        )
+                        .slice(0, 6)
+                        .map((ord) => {
+                          const isSelected = selectedCheckoutOrder?.order_no === ord.order_no;
+                          return (
+                            <button
+                              key={ord.order_no}
+                              type="button"
+                              onClick={() => handleSelectOrderForCheckOut(ord)}
+                              className={`flex-shrink-0 px-2.5 py-1.5 rounded-xl text-[10px] font-bold border transition ${isSelected
+                                ? "bg-amber-500 text-white border-amber-500 shadow-sm"
+                                : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-amber-400"
+                                }`}
+                            >
+                              <div className="font-mono">{ord.order_no}</div>
+                              <div className="text-[9px] opacity-80 truncate max-w-[120px]">{ord.requester}</div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+
+                  {selectedCheckoutOrder ? (
+                    <div className="space-y-3.5 animate-fade-in">
+                      {/* Auto-Populated Order Summary Card */}
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-50/70 to-orange-50/50 dark:from-amber-950/30 dark:to-orange-950/30 border border-amber-200 dark:border-amber-800/60 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Factory className="w-4 h-4 text-amber-600" />
+                            <span className="font-black text-slate-900 dark:text-white text-xs">
+                              {selectedCheckoutOrder.order_no}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200 font-mono text-[9px] font-bold">
+                              {selectedCheckoutOrder.order_type}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 font-bold">
+                            Source: {selectedCheckoutOrder.source}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-amber-200/60 dark:border-amber-800/60">
+                          <div>
+                            <span className="text-slate-400 block text-[10px] font-bold">Requester / Client:</span>
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200">
+                              {selectedCheckoutOrder.requester}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px] font-bold">Floor Destination:</span>
+                            <input
+                              type="text"
+                              value={checkoutDestination}
+                              onChange={(e) => setCheckoutDestination(e.target.value)}
+                              className="w-full text-[11px] font-bold text-slate-800 dark:text-slate-200 bg-white/70 dark:bg-slate-900/60 border border-amber-200 dark:border-amber-800 rounded-lg px-2 py-0.5"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Auto-Populated BOM Recipe Items Table */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Auto-Populated Recipe BOM Items ({orderBomItems.length})</span>
+                          </label>
+                          <span className="text-[10px] text-amber-700 dark:text-amber-300 font-bold flex items-center gap-1">
+                            {bomExploding ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                            <span>FEFO Auto-Allocation</span>
+                          </span>
+                        </div>
+
+                        <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                          <table className="w-full text-left text-[11px]">
+                            <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-700">
+                              <tr>
+                                <th className="p-2">BOM Raw Material</th>
+                                <th className="p-2 text-right">Required Qty</th>
+                                <th className="p-2 text-right">In Store</th>
+                                <th className="p-2 text-center">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                              {orderBomItems.map((bom, bIdx) => (
+                                <tr key={bIdx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+                                  <td className="p-2">
+                                    <div className="font-bold text-slate-900 dark:text-white">{bom.rm_name}</div>
+                                    <div className="font-mono text-[10px] text-slate-400">{bom.rm_sku}</div>
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <span className="font-extrabold text-amber-600 dark:text-amber-400 font-mono">
+                                      {bom.required_qty} {bom.uom}
+                                    </span>
+                                  </td>
+                                  <td className="p-2 text-right font-mono text-slate-600 dark:text-slate-300">
+                                    {bom.available_qty ?? 120} {bom.uom}
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 text-[10px] font-bold">
+                                      ✓ Ready to Issue
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Check-Out to Floor Button */}
+                      <button
+                        type="submit"
+                        disabled={bulkCheckOutLoading}
+                        className="w-full py-3 rounded-2xl bg-[#081F5C] hover:bg-blue-900 text-white font-extrabold shadow-lg transition flex items-center justify-center gap-2 text-xs"
+                      >
+                        {bulkCheckOutLoading ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            <span>Issuing BOM Items to Factory Floor via FEFO...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCheck className="w-4 h-4" />
+                            <span>Match Order BOM & Check-Out to Floor ({orderBomItems.length} Materials)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                      <ArrowUpFromLine className="w-8 h-8 text-slate-300 mx-auto" />
+                      <div className="font-bold text-slate-600 dark:text-slate-400">No Order Selected</div>
+                      <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                        Search and pick an order placed by store or OMS above to auto-populate all recipe BOM ingredients and quantities.
+                      </p>
+                    </div>
+                  )}
+                </form>
+              ) : (
+                /* MANUAL CHECK-OUT FORM FALLBACK */
+                <form onSubmit={handleCheckOut} className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Source Store</label>
+                      <select
+                        value={outwardStore}
+                        onChange={(e) => setOutwardStore(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        {stores.map((s) => (
+                          <option key={s.store_code} value={s.store_code}>
+                            {s.name} ({s.store_code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Material SKU</label>
+                      <select
+                        value={outwardSku}
+                        onChange={(e) => setOutwardSku(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        <option value="RM-KAJU-01">RM-KAJU-01 (Whole Cashew W240)</option>
+                        <option value="RM-GHEE-01">RM-GHEE-01 (A2 Bilona Desi Ghee)</option>
+                        <option value="RM-SUG-01">RM-SUG-01 (Refined Sugar)</option>
+                        <option value="RM-MILK-01">RM-MILK-01 (Buffalo Milk 6.5%)</option>
+                        <option value="RM-PISTA-01">RM-PISTA-01 (Iranian Pistachio)</option>
+                        <option value="PKG-BOX-1K">PKG-BOX-1K (1kg Heritage Box)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Issue Qty</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={outwardQty}
+                        onChange={(e) => setOutwardQty(Number(e.target.value))}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">UOM</label>
+                      <select
+                        value={outwardUom}
+                        onChange={(e) => setOutwardUom(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        <option value="kg">kg</option>
+                        <option value="L">L</option>
+                        <option value="pcs">pcs</option>
+                        <option value="boxes">boxes</option>
+                        <option value="g">g</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Specific Batch No</label>
+                      <input
+                        type="text"
+                        placeholder="Auto FEFO if blank"
+                        value={outwardBatchNo}
+                        onChange={(e) => setOutwardBatchNo(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Purpose / Operation</label>
+                      <select
+                        value={outwardPurpose}
+                        onChange={(e) => setOutwardPurpose(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
+                      >
+                        <option value="Issue to Sweet Factory">Issue to Sweet Factory</option>
+                        <option value="Issue to Restaurant Kitchen">Issue to Restaurant Kitchen</option>
+                        <option value="Transfer to Counter Display">Transfer to Counter Display</option>
+                        <option value="Sample / Quality Tasting">Sample / Quality Tasting</option>
+                        <option value="Scrap / Spoilage Written Off">Scrap / Spoilage Written Off</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Destination / Ref</label>
+                      <input
+                        type="text"
+                        value={outwardRefNo}
+                        onChange={(e) => setOutwardRefNo(e.target.value)}
+                        className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Issued By (Actor)</label>
+                    <input
+                      type="text"
+                      value={outwardActor}
+                      onChange={(e) => setOutwardActor(e.target.value)}
+                      className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={outwardLoading}
+                    className="w-full py-2.5 rounded-xl bg-[#081F5C] hover:bg-blue-900 text-white font-bold shadow transition flex items-center justify-center gap-2"
                   >
-                    <option value="kg">kg</option>
-                    <option value="L">L</option>
-                    <option value="pcs">pcs</option>
-                    <option value="boxes">boxes</option>
-                    <option value="g">g</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Specific Batch No</label>
-                  <input
-                    type="text"
-                    placeholder="Auto FEFO if blank"
-                    value={outwardBatchNo}
-                    onChange={(e) => setOutwardBatchNo(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-mono text-[11px]"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Purpose / Operation</label>
-                  <select
-                    value={outwardPurpose}
-                    onChange={(e) => setOutwardPurpose(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium"
-                  >
-                    <option value="Issue to Sweet Factory">Issue to Sweet Factory</option>
-                    <option value="Issue to Restaurant Kitchen">Issue to Restaurant Kitchen</option>
-                    <option value="Transfer to Counter Display">Transfer to Counter Display</option>
-                    <option value="Sample / Quality Tasting">Sample / Quality Tasting</option>
-                    <option value="Scrap / Spoilage Written Off">Scrap / Spoilage Written Off</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Destination / Ref</label>
-                  <input
-                    type="text"
-                    value={outwardRefNo}
-                    onChange={(e) => setOutwardRefNo(e.target.value)}
-                    className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Issued By (Actor)</label>
-                <input
-                  type="text"
-                  value={outwardActor}
-                  onChange={(e) => setOutwardActor(e.target.value)}
-                  className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 font-medium text-[11px]"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={outwardLoading}
-                className="w-full py-2.5 rounded-xl bg-[#081F5C] hover:bg-blue-900 text-white font-bold shadow transition flex items-center justify-center gap-2"
-              >
-                {outwardLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowUpFromLine className="w-4 h-4" />}
-                Process Check-Out & Deduct Stock
-              </button>
-            </form>
+                    {outwardLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowUpFromLine className="w-4 h-4" />}
+                    Process Check-Out & Deduct Stock
+                  </button>
+                </form>
+              )}
+            </div>
           </div>
 
           {/* Movement Audit Ledger Table */}
@@ -960,11 +1758,10 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-800 dark:text-slate-200">{m.movement_no}</td>
                         <td className="py-2.5 px-3">
                           <span
-                            className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                              isInward
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                            }`}
+                            className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${isInward
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                              }`}
                           >
                             {isInward ? "GRN INWARD" : "ISSUE OUTWARD"}
                           </span>

@@ -130,9 +130,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       }
                       alt={branding.customer_name || "Customer Logo"}
                       style={{
-                        height: `${Math.min(Math.max(branding.customer_logo_height_px || 38, 28), 52)}px`,
+                        height: `${Math.min(Math.max(branding.customer_logo_height_px || 52, 42), 64)}px`,
                       }}
-                      className="w-auto max-w-[140px] object-contain drop-shadow"
+                      className="w-auto max-w-[160px] object-contain drop-shadow"
                     />
                     <span className="text-[10px] font-extrabold text-[#081F5C] dark:text-amber-200 mt-1">
                       {branding.customer_trade_name || branding.customer_name}
@@ -199,9 +199,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     }
                     alt={branding.customer_name || "Customer Logo"}
                     style={{
-                      height: `${Math.min(Math.max(branding.customer_logo_height_px || 34, 24), 40)}px`,
+                      height: `${Math.min(Math.max(branding.customer_logo_height_px || 44, 36), 54)}px`,
                     }}
-                    className="w-auto max-w-[120px] object-contain drop-shadow-sm shrink-0"
+                    className="w-auto max-w-[140px] object-contain drop-shadow-sm shrink-0"
                   />
                 </>
               )}

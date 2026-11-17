@@ -19,7 +19,9 @@ import {
   Sparkles,
   ChevronRight,
   ShieldCheck,
-  PackageCheck
+  PackageCheck,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { BarcodeSvg } from "../components/BarcodeSvg";
@@ -42,6 +44,9 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionProcessing, setActionProcessing] = useState<number | string | null>(null);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
+  const [selectedIndentIds, setSelectedIndentIds] = useState<number[]>([]);
+  const [batchProcessing, setBatchProcessing] = useState(false);
 
   // New batch plan
   const [fgSku, setFgSku] = useState("FG-RAS-01");
@@ -132,6 +137,52 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
       notify(false, e.message || "Failed to convert indent to production");
     } finally {
       setActionProcessing(null);
+    }
+  };
+
+  const handleBatchAcceptOrders = async () => {
+    if (selectedOrderIds.length === 0) return;
+    setBatchProcessing(true);
+    let count = 0;
+    try {
+      for (const id of selectedOrderIds) {
+        try {
+          await apiFetch(`/api/factory/orders/${id}/accept`, { method: "POST" });
+          count++;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      notify(true, `Accept All Orders: Successfully accepted ${count} production orders into queue!`);
+      setSelectedOrderIds([]);
+      loadData();
+    } catch (e: any) {
+      notify(false, `Batch error: ${e.message || e}`);
+    } finally {
+      setBatchProcessing(false);
+    }
+  };
+
+  const handleBatchAcceptIndents = async () => {
+    if (selectedIndentIds.length === 0) return;
+    setBatchProcessing(true);
+    let count = 0;
+    try {
+      for (const id of selectedIndentIds) {
+        try {
+          await apiFetch(`/api/factory/orders/accept-indent/${id}`, { method: "POST" });
+          count++;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      notify(true, `Accept All Indents: Successfully allotted ${count} outlet indents to production!`);
+      setSelectedIndentIds([]);
+      loadData();
+    } catch (e: any) {
+      notify(false, `Batch error: ${e.message || e}`);
+    } finally {
+      setBatchProcessing(false);
     }
   };
 
@@ -344,10 +395,56 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
 
           {/* Section A: Lined Up Orders in Factory Inbox */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-              <Layers className="w-3.5 h-3.5" />
-              Assigned Production Orders in Factory Queue ({inboxOrders.length})
-            </h4>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Layers className="w-3.5 h-3.5" />
+                Assigned Production Orders in Factory Queue ({inboxOrders.length})
+              </h4>
+
+              {inboxOrders.some((o: any) => o.status === "INBOX" || o.status === "Planned") && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const unaccepted = inboxOrders.filter(
+                        (o: any) => o.status === "INBOX" || o.status === "Planned"
+                      );
+                      if (selectedOrderIds.length === unaccepted.length) {
+                        setSelectedOrderIds([]);
+                      } else {
+                        setSelectedOrderIds(unaccepted.map((o: any) => o.id));
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-blue-200 dark:border-blue-800 text-xs font-bold text-[#081F5C] dark:text-sky-300 shadow-sm transition"
+                  >
+                    {selectedOrderIds.length ===
+                      inboxOrders.filter((o: any) => o.status === "INBOX" || o.status === "Planned").length &&
+                    selectedOrderIds.length > 0 ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                    Select All ({inboxOrders.filter((o: any) => o.status === "INBOX" || o.status === "Planned").length})
+                  </button>
+
+                  {selectedOrderIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleBatchAcceptOrders}
+                      disabled={batchProcessing}
+                      className="px-4 py-1.5 bg-[#081F5C] hover:bg-blue-900 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      {batchProcessing ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      Accept All Selected for Production ({selectedOrderIds.length})
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {inboxOrders.length === 0 ? (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center text-slate-400 text-xs">
@@ -365,7 +462,27 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
                     className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:border-blue-400 transition"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
+                      <div className="flex items-start gap-3">
+                        {!isAccepted && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedOrderIds((prev) =>
+                                prev.includes(order.id)
+                                  ? prev.filter((id) => id !== order.id)
+                                  : [...prev, order.id]
+                              )
+                            }
+                            className="mt-1"
+                          >
+                            {selectedOrderIds.includes(order.id) ? (
+                              <CheckSquare className="w-4 h-4 text-blue-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                        )}
+                        <div>
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-bold text-xs text-[#081F5C] dark:text-sky-400">
                             {order.prod_no}
@@ -385,6 +502,7 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                           Assigned Line: <b>{order.kettle_line}</b> • Est RM Cost: {formatINR(order.expected_rm_cost)}
                         </div>
+                      </div>
                       </div>
 
                       <div className="flex items-center gap-2.5">
@@ -447,10 +565,51 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
 
           {/* Section B: Direct Outlet Indents Queue */}
           <div className="space-y-3 pt-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-              <Truck className="w-3.5 h-3.5" />
-              Incoming Outlet Indents Awaiting Production Allocation ({pendingIndents.length})
-            </h4>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Truck className="w-3.5 h-3.5" />
+                Incoming Outlet Indents Awaiting Production Allocation ({pendingIndents.length})
+              </h4>
+
+              {pendingIndents.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedIndentIds.length === pendingIndents.length) {
+                        setSelectedIndentIds([]);
+                      } else {
+                        setSelectedIndentIds(pendingIndents.map((i: any) => i.id));
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-900 dark:text-amber-200 shadow-sm transition"
+                  >
+                    {selectedIndentIds.length === pendingIndents.length && selectedIndentIds.length > 0 ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-amber-600" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                    Select All ({pendingIndents.length})
+                  </button>
+
+                  {selectedIndentIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleBatchAcceptIndents}
+                      disabled={batchProcessing}
+                      className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition disabled:opacity-50"
+                    >
+                      {batchProcessing ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      Allot All Selected Indents ({selectedIndentIds.length})
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
 
             {pendingIndents.length === 0 ? (
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 text-center text-slate-400 text-xs">
@@ -465,7 +624,23 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
                       key={ind.id}
                       className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex items-center justify-between"
                     >
-                      <div>
+                      <div className="flex items-start gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedIndentIds((prev) =>
+                              prev.includes(ind.id) ? prev.filter((id) => id !== ind.id) : [...prev, ind.id]
+                            )
+                          }
+                          className="mt-0.5"
+                        >
+                          {selectedIndentIds.includes(ind.id) ? (
+                            <CheckSquare className="w-4 h-4 text-amber-600" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-400" />
+                          )}
+                        </button>
+                        <div>
                         <div className="flex items-center gap-2 text-xs">
                           <span className="font-mono font-bold text-blue-700 dark:text-sky-300">{ind.indent_no}</span>
                           <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950 text-amber-700">
@@ -479,6 +654,7 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
                         <div className="text-[11px] text-slate-500">
                           Demand Qty: <b>{ind.qty} {ind.uom}</b>
                         </div>
+                      </div>
                       </div>
 
                       <button

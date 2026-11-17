@@ -1,5 +1,6 @@
 import json
 import random
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -60,6 +61,8 @@ class EstimateCreate(BaseModel):
     mode: str = "3_COUNTER"
     items: list[dict]
     estimate_staff: str = "Counter Staff 1"
+    customer_name: Optional[str] = None
+    customer_mobile: Optional[str] = None
 
 
 class CartUpdate(BaseModel):
@@ -112,9 +115,56 @@ class IndentCreate(BaseModel):
     priority: str = "HIGH"
 
 
+class BulkIndentItem(BaseModel):
+    sku: str
+    qty: float
+    priority: str = "HIGH"
+    notes: str = ""
+
+
+class BulkIndentCreate(BaseModel):
+    outlet_code: str
+    requisition_type: str = "REGULAR"  # "REGULAR", "LOW_STOCK", "EOD_NEXT_DAY"
+    notes: str = ""
+    items: list[BulkIndentItem]
+
+
 class ShiftClosePayload(BaseModel):
     shift_id: int
     declared_cash: float
+
+
+class ShiftStartPayload(BaseModel):
+    outlet_code: str = "DEL01"
+    cashier_name: str
+    counter_name: str = "Cash Counter 1"
+    opening_cash: float = 5000.0
+    started_by: str = "Shop Manager"
+
+
+class ShiftHandoverPayload(BaseModel):
+    shift_id: int
+    remittance_breakdown: dict = {}
+    declared_cash: float
+    handover_to: str
+
+
+class ShiftAcceptHandoverPayload(BaseModel):
+    shift_id: int
+    verified_by: str = "Shop Manager"
+    start_next_shift: bool = False
+    next_cashier_name: Optional[str] = None
+    next_counter_name: Optional[str] = None
+    next_opening_cash: Optional[float] = None
+
+
+class DrawerDeclarePayload(BaseModel):
+    outlet_code: str
+    cashier_id: str
+    opening_cash: float = 5000.0
+    declared_cash: float
+    denominations: Optional[dict] = None
+    notes: Optional[str] = None
 
 
 def find_order_by_code_or_last4(
@@ -218,13 +268,14 @@ def create_estimate(payload: EstimateCreate):
         return conn.execute(
             """
             INSERT INTO pos_mod.pos_orders
-            (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, estimate_staff)
-            VALUES (%s,%s,%s,'ESTIMATE_GENERATED',%s::jsonb,%s,0,%s,%s,%s,%s,%s) RETURNING *
+            (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, estimate_staff, customer_name, customer_mobile)
+            VALUES (%s,%s,%s,'ESTIMATE_GENERATED',%s::jsonb,%s,0,%s,%s,%s,%s,%s,%s,%s) RETURNING *
             """,
             (
                 est_no, payload.outlet_code, payload.mode, json.dumps(payload.items),
                 totals["subtotal"], c_hash, totals["cgst"], totals["sgst"],
                 totals["grand_total"], payload.estimate_staff,
+                payload.customer_name, payload.customer_mobile,
             ),
         ).fetchone()
 
@@ -480,7 +531,35 @@ def shop_manager_overview(outlet_code: str = "DEL01"):
         promos = conn.execute("SELECT * FROM pos_mod.promos ORDER BY id DESC").fetchall()
         approvers = conn.execute("SELECT * FROM pos_mod.approvers ORDER BY id").fetchall()
         otps = conn.execute("SELECT * FROM pos_mod.otp_requests ORDER BY created_at DESC LIMIT 20").fetchall()
-        shifts = conn.execute("SELECT * FROM pos_mod.shifts ORDER BY id DESC LIMIT 10").fetchall()
+        shifts_raw = conn.execute(
+            "SELECT * FROM pos_mod.shifts WHERE outlet_code = %s ORDER BY id DESC LIMIT 20",
+            (outlet_code,),
+        ).fetchall()
+        shifts = []
+        for s in shifts_raw:
+            sd = dict(s)
+            if sd.get("status") in ("OPEN", "HANDOVER_PENDING"):
+                c_res = conn.execute(
+                    """
+                    SELECT COALESCE(SUM(
+                        (SELECT COALESCE(SUM((sp->>'amount')::numeric), 0)
+                         FROM jsonb_array_elements(payment_splits) sp
+                         WHERE sp->>'mode' ILIKE '%%CASH%%')
+                    ), 0) as cash_sum
+                    FROM pos_mod.pos_orders
+                    WHERE outlet_code = %s
+                      AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+                      AND (cashier_id = %s OR cashier_id ILIKE %s)
+                      AND created_at >= %s
+                    """,
+                    (sd["outlet_code"], sd["cashier_name"], f"%{sd['cashier_name']}%", sd["opened_at"]),
+                ).fetchone()
+                live_cash = float(c_res["cash_sum"]) if c_res else 0.0
+                sd["system_cash_sales"] = live_cash
+                sd["expected_cash"] = round(float(sd["opening_cash"]) + live_cash, 2)
+            else:
+                sd["expected_cash"] = round(float(sd["opening_cash"]) + float(sd.get("system_cash_sales") or 0), 2)
+            shifts.append(sd)
         indents = conn.execute("SELECT * FROM pos_mod.outlet_indents ORDER BY id DESC LIMIT 15").fetchall()
         orders = conn.execute(
             "SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s ORDER BY id DESC LIMIT 25",
@@ -523,8 +602,9 @@ def create_indent(payload: IndentCreate):
         item = conn.execute("SELECT name, inventory_uom FROM admin_mod.items WHERE sku = %s", (payload.sku,)).fetchone()
         if not item:
             raise HTTPException(status_code=404, detail="SKU not found")
-        cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.outlet_indents").fetchone()["c"] + 16
-        ind_no = f"IND-2026-{cnt:03d}"
+        max_row = conn.execute("SELECT MAX(CAST(SUBSTRING(indent_no FROM 'IND-2026-(\\d+)') AS INTEGER)) AS m FROM pos_mod.outlet_indents").fetchone()
+        next_ind = (max_row["m"] if max_row and max_row["m"] else 15) + 1
+        ind_no = f"IND-2026-{next_ind:03d}"
         return conn.execute(
             """
             INSERT INTO pos_mod.outlet_indents (indent_no, outlet_code, sku, item_name, qty, uom, priority, status)
@@ -532,6 +612,92 @@ def create_indent(payload: IndentCreate):
             """,
             (ind_no, payload.outlet_code, payload.sku, item["name"], payload.qty, item["inventory_uom"], payload.priority),
         ).fetchone()
+
+
+@app.post("/shop/indents/bulk")
+def create_bulk_indents(payload: BulkIndentCreate):
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="Requisition items cannot be empty")
+    with get_conn() as conn:
+        max_row = conn.execute("SELECT MAX(CAST(SUBSTRING(indent_no FROM 'IND-2026-(\\d+)') AS INTEGER)) AS m FROM pos_mod.outlet_indents").fetchone()
+        next_ind = (max_row["m"] if max_row and max_row["m"] else 15) + 1
+        
+        created = []
+        for idx, itm in enumerate(payload.items):
+            item_meta = conn.execute("SELECT name, inventory_uom FROM admin_mod.items WHERE sku = %s", (itm.sku,)).fetchone()
+            name = item_meta["name"] if item_meta else itm.sku
+            uom = item_meta["inventory_uom"] if item_meta else "kg"
+            ind_no = f"IND-2026-{next_ind + idx:03d}"
+            prio = itm.priority or ("EOD_NEXT_DAY" if payload.requisition_type == "EOD_NEXT_DAY" else "HIGH")
+            row = conn.execute(
+                """
+                INSERT INTO pos_mod.outlet_indents (indent_no, outlet_code, sku, item_name, qty, uom, priority, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'REQUESTED') RETURNING *
+                """,
+                (ind_no, payload.outlet_code, itm.sku, name, itm.qty, uom, prio),
+            ).fetchone()
+            created.append(row)
+        return {
+            "success": True,
+            "created_count": len(created),
+            "indents": created,
+            "message": f"Successfully raised {len(created)} stock requisitions to Production Manager!"
+        }
+
+
+@app.get("/shop/eod-stock-analysis")
+def get_eod_stock_analysis(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        store_code = f"STR-{outlet_code}-BACK"
+        # Current stock grouped by SKU
+        stock_rows = conn.execute(
+            """
+            SELECT sku, item_name, SUM(qty) AS total_qty, uom, MIN(expiry_date) as nearest_expiry
+            FROM stores_mod.stock_batches
+            WHERE store_code = %s AND qty > 0
+            GROUP BY sku, item_name, uom
+            """,
+            (store_code,),
+        ).fetchall()
+        
+        # All sweet catalog items with min par levels
+        catalog_items = conn.execute(
+            """
+            SELECT sku, name, category, sub_category, inventory_uom, min_par_level, cost_price, selling_price
+            FROM admin_mod.items
+            WHERE category IN ('FG-Sweet', 'FG') OR item_type = 'Packed Food'
+            ORDER BY min_par_level DESC, name ASC
+            """
+        ).fetchall()
+        
+        stock_map = {r["sku"]: float(r["total_qty"]) for r in stock_rows}
+        
+        analysis = []
+        for it in catalog_items:
+            curr = stock_map.get(it["sku"], 0.0)
+            par = float(it["min_par_level"] or 50.0)
+            deficit = max(0.0, par - curr)
+            recommended_reorder = round(deficit * 1.25 if deficit > 0 else 0.0, 1)
+            is_low = curr <= 15.0 or deficit > 0
+            analysis.append({
+                "sku": it["sku"],
+                "name": it["name"],
+                "uom": it["inventory_uom"],
+                "current_stock": curr,
+                "min_par_level": par,
+                "deficit": deficit,
+                "recommended_reorder": recommended_reorder if recommended_reorder > 0 else (25.0 if curr <= 10 else 0),
+                "is_low_stock": is_low,
+                "selling_price": float(it["selling_price"] or 500),
+            })
+            
+        return {
+            "outlet_code": outlet_code,
+            "store_code": store_code,
+            "total_skus": len(analysis),
+            "low_stock_count": len([a for a in analysis if a["is_low_stock"]]),
+            "items": analysis
+        }
 
 
 @app.post("/shop/expire-eod")
@@ -542,6 +708,141 @@ def expire_eod_estimates(outlet_code: str = "DEL01"):
             (outlet_code,),
         ).fetchall()
         return {"expired_count": len(res), "expired": [r["estimate_no"] for r in res]}
+
+
+@app.post("/shop/shifts/start")
+def start_shift(payload: ShiftStartPayload):
+    with get_conn() as conn:
+        cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.shifts").fetchone()["c"] + 1
+        shift_no = f"SHF-{payload.outlet_code}-{cnt:03d}"
+        sh = conn.execute(
+            """
+            INSERT INTO pos_mod.shifts (
+                shift_no, outlet_code, cashier_name, counter_name, opening_cash, 
+                system_cash_sales, status, started_by, opened_at
+            )
+            VALUES (%s, %s, %s, %s, %s, 0.0, 'OPEN', %s, NOW())
+            RETURNING *
+            """,
+            (
+                shift_no,
+                payload.outlet_code,
+                payload.cashier_name.strip(),
+                payload.counter_name.strip(),
+                float(payload.opening_cash),
+                payload.started_by.strip(),
+            ),
+        ).fetchone()
+        return {"success": True, "shift": sh}
+
+
+@app.post("/shop/shifts/handover")
+def cashier_shift_handover(payload: ShiftHandoverPayload):
+    with get_conn() as conn:
+        sh = conn.execute("SELECT * FROM pos_mod.shifts WHERE id = %s", (payload.shift_id,)).fetchone()
+        if not sh:
+            raise HTTPException(status_code=404, detail="Shift not found")
+
+        # Calculate system cash sales for this cashier/counter since opened_at
+        cash_res = conn.execute(
+            """
+            SELECT COALESCE(SUM(
+                (SELECT COALESCE(SUM((sp->>'amount')::numeric), 0)
+                 FROM jsonb_array_elements(payment_splits) sp
+                 WHERE sp->>'mode' ILIKE '%%CASH%%')
+            ), 0) as cash_sum
+            FROM pos_mod.pos_orders
+            WHERE outlet_code = %s
+              AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+              AND (cashier_id = %s OR cashier_id ILIKE %s)
+              AND created_at >= %s
+            """,
+            (sh["outlet_code"], sh["cashier_name"], f"%{sh['cashier_name']}%", sh["opened_at"]),
+        ).fetchone()
+
+        system_cash = float(cash_res["cash_sum"]) if cash_res else 0.0
+        expected = round(float(sh["opening_cash"]) + system_cash, 2)
+        variance = round(float(payload.declared_cash) - expected, 2)
+
+        updated = conn.execute(
+            """
+            UPDATE pos_mod.shifts
+            SET system_cash_sales = %s,
+                declared_cash = %s,
+                variance = %s,
+                remittance_breakdown = %s::jsonb,
+                handover_to = %s,
+                handover_at = NOW(),
+                status = 'HANDOVER_PENDING'
+            WHERE id = %s
+            RETURNING *
+            """,
+            (
+                system_cash,
+                float(payload.declared_cash),
+                variance,
+                json.dumps(payload.remittance_breakdown),
+                payload.handover_to.strip(),
+                payload.shift_id,
+            ),
+        ).fetchone()
+        return {"success": True, "shift": updated, "expected": expected, "variance": variance}
+
+
+@app.post("/shop/shifts/accept-handover")
+def accept_shift_handover(payload: ShiftAcceptHandoverPayload):
+    with get_conn() as conn:
+        sh = conn.execute("SELECT * FROM pos_mod.shifts WHERE id = %s", (payload.shift_id,)).fetchone()
+        if not sh:
+            raise HTTPException(status_code=404, detail="Shift not found")
+
+        # Close current shift
+        closed = conn.execute(
+            """
+            UPDATE pos_mod.shifts
+            SET status = 'CLOSED',
+                closed_at = NOW(),
+                verified_by = %s
+            WHERE id = %s
+            RETURNING *
+            """,
+            (payload.verified_by.strip(), payload.shift_id),
+        ).fetchone()
+
+        new_shift = None
+        if payload.start_next_shift and payload.next_cashier_name:
+            cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.shifts").fetchone()["c"] + 1
+            next_shift_no = f"SHF-{closed['outlet_code']}-{cnt:03d}"
+            next_opening = (
+                float(payload.next_opening_cash)
+                if payload.next_opening_cash is not None
+                else float(closed["declared_cash"] or closed["opening_cash"])
+            )
+            counter = payload.next_counter_name or closed["counter_name"] or "Cash Counter 1"
+            new_shift = conn.execute(
+                """
+                INSERT INTO pos_mod.shifts (
+                    shift_no, outlet_code, cashier_name, counter_name, opening_cash,
+                    system_cash_sales, status, started_by, opened_at
+                )
+                VALUES (%s, %s, %s, %s, %s, 0.0, 'OPEN', %s, NOW())
+                RETURNING *
+                """,
+                (
+                    next_shift_no,
+                    closed["outlet_code"],
+                    payload.next_cashier_name.strip(),
+                    counter.strip(),
+                    next_opening,
+                    payload.verified_by.strip(),
+                ),
+            ).fetchone()
+
+        return {
+            "success": True,
+            "closed_shift": closed,
+            "next_shift": new_shift,
+        }
 
 
 @app.post("/shop/shifts/close")
@@ -574,27 +875,120 @@ def normalize_tender_mode(raw_mode: str) -> str:
     return "UPI"
 
 
-@app.get("/reports/eod")
-def cashier_eod_report(outlet_code: str = "DEL01", scope: str = "today"):
+@app.post("/reports/eod/declare-drawer")
+def declare_drawer_cash(payload: DrawerDeclarePayload):
     with get_conn() as conn:
+        shift = conn.execute(
+            """
+            SELECT * FROM pos_mod.shifts
+            WHERE outlet_code = %s AND (cashier_name = %s OR cashier_name ILIKE %s)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (payload.outlet_code, payload.cashier_id, f"%{payload.cashier_id}%"),
+        ).fetchone()
+
+        cash_res = conn.execute(
+            """
+            SELECT COALESCE(SUM(
+                (SELECT COALESCE(SUM((sp->>'amount')::numeric), 0)
+                 FROM jsonb_array_elements(payment_splits) sp
+                 WHERE sp->>'mode' ILIKE '%%CASH%%')
+            ), 0) as cash_sum
+            FROM pos_mod.pos_orders
+            WHERE outlet_code = %s
+              AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+              AND (cashier_id = %s OR cashier_id ILIKE %s)
+              AND (
+                DATE(COALESCE(paid_at, created_at) AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')
+                OR created_at >= NOW() - INTERVAL '24 hours'
+              )
+            """,
+            (payload.outlet_code, payload.cashier_id, f"%{payload.cashier_id}%"),
+        ).fetchone()
+
+        system_cash = float(cash_res["cash_sum"]) if cash_res else 0.0
+        expected = round(float(payload.opening_cash) + system_cash, 2)
+        variance = round(float(payload.declared_cash) - expected, 2)
+
+        if shift and shift["status"] == "OPEN":
+            updated = conn.execute(
+                """
+                UPDATE pos_mod.shifts
+                SET opening_cash = %s, system_cash_sales = %s, declared_cash = %s, variance = %s, status = 'CLOSED', closed_at = NOW()
+                WHERE id = %s RETURNING *
+                """,
+                (payload.opening_cash, system_cash, payload.declared_cash, variance, shift["id"]),
+            ).fetchone()
+        else:
+            cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.shifts").fetchone()["c"] + 1
+            shift_no = f"SHF-{payload.outlet_code}-{cnt:02d}"
+            updated = conn.execute(
+                """
+                INSERT INTO pos_mod.shifts (shift_no, outlet_code, cashier_name, opening_cash, system_cash_sales, declared_cash, variance, status, opened_at, closed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'CLOSED', NOW() - INTERVAL '8 hours', NOW())
+                RETURNING *
+                """,
+                (shift_no, payload.outlet_code, payload.cashier_id, payload.opening_cash, system_cash, payload.declared_cash, variance),
+            ).fetchone()
+
+        return {
+            "success": True,
+            "shift": updated,
+            "reconciliation": {
+                "outlet_code": payload.outlet_code,
+                "cashier_id": payload.cashier_id,
+                "opening_cash": payload.opening_cash,
+                "system_cash_sales": system_cash,
+                "expected_cash": expected,
+                "declared_cash": payload.declared_cash,
+                "variance": variance,
+                "matched": abs(variance) < 0.01,
+                "denominations": payload.denominations or {},
+            },
+        }
+
+
+@app.get("/reports/eod")
+def cashier_eod_report(
+    outlet_code: str = "DEL01",
+    scope: str = "today",
+    cashier_id: Optional[str] = None,
+):
+    with get_conn() as conn:
+        cashier_filter = ""
+        params: list = [outlet_code]
+        if cashier_id and cashier_id.strip() and cashier_id.strip().upper() != "ALL":
+            cashier_filter = " AND (cashier_id = %s OR cashier_id ILIKE %s)"
+            params.extend([cashier_id.strip(), f"%{cashier_id.strip()}%"])
+
         if scope == "all":
             orders = conn.execute(
-                "SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s ORDER BY id DESC",
-                (outlet_code,),
+                f"SELECT * FROM pos_mod.pos_orders WHERE outlet_code = %s {cashier_filter} ORDER BY id DESC",
+                tuple(params),
             ).fetchall()
         else:
             orders = conn.execute(
-                """
+                f"""
                 SELECT * FROM pos_mod.pos_orders
                 WHERE outlet_code = %s
                   AND (
                     DATE(COALESCE(paid_at, created_at) AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')
                     OR created_at >= NOW() - INTERVAL '24 hours'
                   )
+                  {cashier_filter}
                 ORDER BY id DESC
                 """,
-                (outlet_code,),
+                tuple(params),
             ).fetchall()
+
+        all_outlet_cashiers = conn.execute(
+            """
+            SELECT DISTINCT cashier_id FROM pos_mod.pos_orders
+            WHERE outlet_code = %s AND cashier_id IS NOT NULL AND cashier_id != ''
+            """,
+            (outlet_code,),
+        ).fetchall()
+        available_cashiers = sorted(list(set(r["cashier_id"] for r in all_outlet_cashiers if r["cashier_id"])))
 
         shifts = conn.execute(
             "SELECT * FROM pos_mod.shifts WHERE outlet_code = %s ORDER BY id DESC LIMIT 5",
@@ -731,10 +1125,31 @@ def cashier_eod_report(outlet_code: str = "DEL01", scope: str = "today"):
             reverse=True,
         )
 
+        # Active shift / drawer reconciliation calculation
+        latest_shift = shifts[0] if shifts else None
+        opening_cash = float(latest_shift["opening_cash"]) if latest_shift else 5000.0
+        cash_sales = tender_totals["Cash"]["amount"]
+        expected_drawer_cash = round(opening_cash + cash_sales, 2)
+        declared_cash = float(latest_shift["declared_cash"]) if (latest_shift and latest_shift.get("declared_cash") is not None) else None
+        variance = round(declared_cash - expected_drawer_cash, 2) if declared_cash is not None else 0.0
+
+        drawer_reconciliation = {
+            "opening_cash": opening_cash,
+            "cash_sales": cash_sales,
+            "expected_drawer_cash": expected_drawer_cash,
+            "declared_cash": declared_cash,
+            "variance": variance,
+            "matched": (abs(variance) < 0.01) if declared_cash is not None else False,
+            "shift_no": latest_shift["shift_no"] if latest_shift else f"SHF-{outlet_code}-01",
+            "cashier_name": cashier_id or (latest_shift["cashier_name"] if latest_shift else "Cashier"),
+            "shift_status": latest_shift["status"] if latest_shift else "OPEN",
+        }
+
         return {
             "summary": {
                 "outlet_code": outlet_code,
                 "scope": scope,
+                "cashier_id": cashier_id,
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "total_orders": len(orders),
                 "paid_orders": paid_orders,
@@ -757,5 +1172,7 @@ def cashier_eod_report(outlet_code: str = "DEL01", scope: str = "today"):
             "product_breakdown": product_breakdown,
             "orders_ledger": orders_ledger,
             "shifts": shifts,
+            "drawer_reconciliation": drawer_reconciliation,
+            "available_cashiers": available_cashiers,
         }
 

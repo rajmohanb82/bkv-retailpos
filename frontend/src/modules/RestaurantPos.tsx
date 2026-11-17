@@ -31,7 +31,7 @@ export const RestaurantPos: React.FC<RestaurantPosProps> = ({
   outlets,
   actorName = "Restaurant Cashier",
 }) => {
-  const restOutlet = activeOutlet === "DEL01" || activeOutlet === "MFG01" ? "GUR02" : activeOutlet;
+  const restOutlet = activeOutlet === "MFG01" ? "DEL01" : activeOutlet;
   const outletObj = outlets.find((o) => o.code === restOutlet);
 
   const [tab, setTab] = useState<"tables" | "takeaway" | "stock" | "eod">("tables");
@@ -165,8 +165,34 @@ export const RestaurantPos: React.FC<RestaurantPosProps> = ({
       }
       setLastBill(paid);
       print40ColumnThermalSlip(paid, outletObj, hwConfig?.restaurant_printer?.driver);
+
+      // Fire KOT to Kitchen so that Takeaway orders show up immediately on KDS counters
+      try {
+        await apiFetch("/api/kot/kots", {
+          method: "POST",
+          body: JSON.stringify({
+            outlet_code: restOutlet,
+            table_code: `TAKEAWAY-${paid.invoice_no?.slice(-4) || "ORDER"}`,
+            order_source: "TAKEAWAY",
+            captain_name: actorName,
+            pax: 1,
+            items: takeawayCart.map((it: any) => ({
+              sku: it.sku,
+              name: it.name,
+              qty: it.qty,
+              unit_price: it.unit_price,
+              station: it.station || it.category || "Main Kitchen",
+              category: it.category || "Main",
+              station_status: "Queued",
+            })),
+          }),
+        });
+      } catch (kotErr) {
+        console.warn("Failed to fire kitchen KOT for takeaway", kotErr);
+      }
+
       setTakeawayCart([]);
-      notify(true, `Takeaway Bill ${paid.invoice_no} paid (${formatINR(paid.grand_total)})!`);
+      notify(true, `Takeaway Bill ${paid.invoice_no} paid (${formatINR(paid.grand_total)}) & fired to Kitchen KDS!`);
     } catch (e: any) {
       notify(false, e.message);
     }

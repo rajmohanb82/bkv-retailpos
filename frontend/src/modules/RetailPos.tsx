@@ -20,6 +20,8 @@ import {
   Printer,
   BarChart3,
   CornerDownLeft,
+  User,
+  Phone,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
@@ -53,8 +55,21 @@ export const RetailPos: React.FC<RetailPosProps> = ({
   const [selectedSlip, setSelectedSlip] = useState<any>(null);
   const [toast, setToast] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [posPage, setPosPage] = useState<number>(1);
+  const POS_PAGE_SIZE = 10;
   const [stagedEntry, setStagedEntry] = useState<{ item: ItemSku; qty: number } | null>(null);
   const [doubleEnterArmed, setDoubleEnterArmed] = useState(false);
+
+  // Customer details for estimate & order
+  const [customerMobile, setCustomerMobile] = useState("");
+  const [customerName, setCustomerName] = useState("");
+
+  // Calculate live quantity left on shop shelf
+  const getStockLeft = (sku: string): number => {
+    const batches = (shopStock || []).filter((b: any) => b.sku === sku);
+    const total = batches.reduce((sum: number, b: any) => sum + (Number(b.qty) || 0), 0);
+    return Math.round(total * 100) / 100;
+  };
 
   // Electronic Weighing Scale Simulator
   const [scaleItem, setScaleItem] = useState<ItemSku | null>(null);
@@ -213,11 +228,15 @@ export const RetailPos: React.FC<RetailPosProps> = ({
           mode: billingMode,
           items: cart,
           estimate_staff: actorName,
+          customer_name: customerName.trim() || undefined,
+          customer_mobile: customerMobile.trim() || undefined,
         }),
       });
       setSelectedSlip(est);
       setCart([]);
       setStagedEntry(null);
+      setCustomerName("");
+      setCustomerMobile("");
       await loadData();
       notify(
         "ok",
@@ -549,11 +568,20 @@ export const RetailPos: React.FC<RetailPosProps> = ({
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     return (
-      i.name.toLowerCase().includes(q) ||
-      i.sku.toLowerCase().includes(q) ||
-      i.sub_category.toLowerCase().includes(q)
+      (i.name || "").toLowerCase().includes(q) ||
+      (i.sku || "").toLowerCase().includes(q) ||
+      ((i as any).item_code || "").toLowerCase().includes(q) ||
+      (i.sub_category || "").toLowerCase().includes(q) ||
+      (i.category || "").toLowerCase().includes(q)
     );
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredCatalog.length / POS_PAGE_SIZE));
+  const currentPage = Math.min(posPage, totalPages);
+  const pagedCatalog = filteredCatalog.slice(
+    (currentPage - 1) * POS_PAGE_SIZE,
+    currentPage * POS_PAGE_SIZE
+  );
 
   // Global Keyboard Hotkeys (F1-F10, +/- for weight/qty, 1-9, Esc)
   useEffect(() => {
@@ -663,9 +691,9 @@ export const RetailPos: React.FC<RetailPosProps> = ({
         }
         if (!isTyping && /^[1-9]$/.test(e.key)) {
           const idx = Number(e.key) - 1;
-          if (filteredCatalog[idx]) {
+          if (pagedCatalog[idx]) {
             e.preventDefault();
-            addItemToCart(filteredCatalog[idx]);
+            addItemToCart(pagedCatalog[idx]);
           }
         }
       }
@@ -681,6 +709,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
     loadedOrder,
     deliveryBarcode,
     deliveryPreviewOrder,
+    pagedCatalog,
     filteredCatalog,
     hwConfig,
     activeOutlet,
@@ -941,6 +970,47 @@ export const RetailPos: React.FC<RetailPosProps> = ({
             {counterTab === "estimate" && (
               <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
                 <div className="md:col-span-7 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+                  {/* Customer Information Capture (Customer Number & Optional Name before starting order) */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/80 to-indigo-50/60 border border-blue-200 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#081F5C]">
+                        <User className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Customer Profile & Receipt Routing (Optional)</span>
+                      </div>
+                      {customerMobile ? (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Attached to Order
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-500">
+                          Ask customer mobile before estimate for SMS bill
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="relative">
+                        <Phone className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="tel"
+                          value={customerMobile}
+                          onChange={(e) => setCustomerMobile(e.target.value)}
+                          placeholder="Customer Mobile (e.g. 98100 12345)"
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                      <div className="relative">
+                        <User className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={customerName}
+                          onChange={(e) => setCustomerName(e.target.value)}
+                          placeholder="Customer Name (Optional, e.g. Rakesh Kumar)"
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h3 className="text-sm font-bold text-annavya-navy">
@@ -956,6 +1026,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                         value={searchQuery}
                         onChange={(e) => {
                           setSearchQuery(e.target.value);
+                          setPosPage(1);
                           setDoubleEnterArmed(false);
                         }}
                         onKeyDown={(e) => {
@@ -964,8 +1035,11 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                             const q = searchQuery.trim().toLowerCase();
                             if (q && filteredCatalog.length > 0) {
                               const exact =
-                                filteredCatalog.find((i) => i.sku.toLowerCase() === q) ||
-                                filteredCatalog[0];
+                                filteredCatalog.find(
+                                  (i) =>
+                                    i.sku.toLowerCase() === q ||
+                                    ((i as any).item_code || "").toLowerCase() === q
+                                ) || filteredCatalog[0];
                               setStagedEntry({
                                 item: exact,
                                 qty: exact.is_loose_weighed ? 0.5 : 1,
@@ -984,7 +1058,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                             adjustStagedQty(e.key === "-" ? -1 : 1);
                           }
                         }}
-                        placeholder="Type Item Code / SKU (e.g. FG-KAJU-01) -> Enter [F4]..."
+                        placeholder="Search by Item Code / SKU (e.g. FG-KAJU-01, FG-BESAN) or Name... [F1]"
                         className="border-2 border-annavya-royal/40 focus:border-annavya-royal rounded-xl px-3 py-2 text-xs font-mono flex-1 focus:outline-none"
                       />
                     </div>
@@ -1001,11 +1075,14 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                           <div className="text-sm font-extrabold text-annavya-navy mt-1">
                             {stagedEntry.item.name}
                           </div>
-                          <div className="text-[11px] text-slate-600">
-                            {formatINR(stagedEntry.item.selling_price)}/{stagedEntry.item.is_loose_weighed ? "kg" : stagedEntry.item.pos_uom} • Est Line:{" "}
-                            <b>
-                              {formatINR(stagedEntry.qty * Number(stagedEntry.item.selling_price))}
-                            </b>
+                          <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-1.5 mt-0.5">
+                            <span>
+                              {formatINR(stagedEntry.item.selling_price)}/{stagedEntry.item.is_loose_weighed ? "kg" : stagedEntry.item.pos_uom} • Est:{" "}
+                              <b>{formatINR(stagedEntry.qty * Number(stagedEntry.item.selling_price))}</b>
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold text-[10px] border border-emerald-200">
+                              Shelf Stock: {getStockLeft(stagedEntry.item.sku)} {stagedEntry.item.pos_uom}
+                            </span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -1073,46 +1150,126 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3">
-                    {filteredCatalog.map((it, idx) => (
+                  {/* Pagination Bar Top (Pages 1-5, Prev, Next) */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3.5 py-2 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                      <span className="text-annavya-navy font-extrabold">Page {currentPage} of {totalPages}</span>
+                      <span className="text-slate-400 font-normal">({filteredCatalog.length} items • 10/page)</span>
+                    </div>
+                    <div className="flex items-center gap-1">
                       <button
-                        key={it.sku}
-                        onClick={() => addItemToCart(it)}
-                        className={`text-left rounded-2xl border transition group ${
-                          searchQuery.trim() && idx === 0
-                            ? "border-2 border-annavya-royal bg-annavya-ice/50 ring-2 ring-annavya-sky/40"
-                            : "border-slate-200 hover:border-annavya-royal hover:bg-annavya-ice/40"
-                        } active:scale-[0.98] ${
-                          touchMode ? "p-4 min-h-[104px]" : "p-3"
-                        }`}
+                        type="button"
+                        disabled={currentPage <= 1}
+                        onClick={() => setPosPage((p) => Math.max(1, p - 1))}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
                       >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                            {it.sku}
-                          </span>
-                          <div className="flex items-center gap-1">
-                            {idx < 9 && (
-                              <kbd className="px-1.5 py-0.5 rounded bg-annavya-navy text-white text-[10px] font-mono font-bold">
-                                {idx + 1}
-                              </kbd>
-                            )}
-                            {it.is_loose_weighed && <Scale className="w-3.5 h-3.5 text-amber-600" />}
-                          </div>
-                        </div>
-                        <div className="font-bold text-xs sm:text-sm text-slate-900 mt-1.5 group-hover:text-annavya-royal">
-                          {it.name}
-                        </div>
-                        <div className="flex items-center justify-between mt-2 text-xs">
-                          <span className="font-extrabold text-annavya-navy">
-                            {formatINR(it.selling_price)}/{it.pos_uom}
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {searchQuery.trim() && idx === 0 ? "↵ Enter to Stage" : `GST ${it.gst_pct}%`}
-                          </span>
-                        </div>
+                        Prev
                       </button>
-                    ))}
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pNum = i + 1;
+                        if (totalPages > 5 && currentPage > 3) {
+                          pNum = Math.min(totalPages - 4 + i, currentPage - 2 + i);
+                        }
+                        return (
+                          <button
+                            key={pNum}
+                            type="button"
+                            onClick={() => setPosPage(pNum)}
+                            className={`w-7 h-7 rounded-lg text-xs font-bold transition ${
+                              currentPage === pNum
+                                ? "bg-annavya-navy text-white shadow-sm"
+                                : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-100"
+                            }`}
+                          >
+                            {pNum}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        disabled={currentPage >= totalPages}
+                        onClick={() => setPosPage((p) => Math.min(totalPages, p + 1))}
+                        className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {pagedCatalog.map((it, idx) => {
+                      const stockLeft = getStockLeft(it.sku);
+                      return (
+                        <button
+                          key={it.sku}
+                          onClick={() => addItemToCart(it)}
+                          className={`text-left rounded-2xl border transition group ${
+                            searchQuery.trim() && idx === 0
+                              ? "border-2 border-annavya-royal bg-annavya-ice/50 ring-2 ring-annavya-sky/40"
+                              : "border-slate-200 hover:border-annavya-royal hover:bg-annavya-ice/40"
+                          } active:scale-[0.98] ${
+                            touchMode ? "p-4 min-h-[104px]" : "p-3"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                              {it.sku}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {idx < 9 && (
+                                <kbd className="px-1.5 py-0.5 rounded bg-annavya-navy text-white text-[10px] font-mono font-bold">
+                                  {idx + 1}
+                                </kbd>
+                              )}
+                              {it.is_loose_weighed && <Scale className="w-3.5 h-3.5 text-amber-600" />}
+                            </div>
+                          </div>
+                          <div className="font-bold text-xs sm:text-sm text-slate-900 mt-1.5 group-hover:text-annavya-royal">
+                            {it.name}
+                          </div>
+                          <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100 text-xs">
+                            <span className="font-extrabold text-annavya-navy">
+                              {formatINR(it.selling_price)}/{it.pos_uom}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full font-mono font-bold text-[10px] ${
+                                stockLeft <= 0
+                                    ? "bg-rose-100 text-rose-700 border border-rose-200"
+                                    : stockLeft <= 10
+                                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                              }`}
+                            >
+                              Left: <b>{stockLeft} {it.pos_uom}</b>
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Pagination Bar Bottom */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1 text-xs text-slate-500">
+                      <span>Jump to page:</span>
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => i + 1).map((pNum) => (
+                          <button
+                            key={pNum}
+                            type="button"
+                            onClick={() => setPosPage(pNum)}
+                            className={`w-6 h-6 rounded-md text-[11px] font-bold ${
+                              currentPage === pNum
+                                ? "bg-annavya-navy text-white"
+                                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                            }`}
+                          >
+                            {pNum}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="md:col-span-5 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col justify-between">

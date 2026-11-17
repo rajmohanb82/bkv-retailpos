@@ -138,6 +138,8 @@ services:
     container_name: annavya-pos-service
     environment:
       DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/pos-service/app:/app/app
     depends_on:
       annavya-db:
         condition: service_healthy
@@ -158,6 +160,8 @@ services:
     container_name: annavya-kot-service
     environment:
       DATABASE_URL: postgresql://annavya:annavya_secret@annavya-db:5432/annavya_erp
+    volumes:
+      - ./services/kot-service/app:/app/app
     depends_on:
       annavya-db:
         condition: service_healthy
@@ -206,6 +210,7 @@ services:
     container_name: annavya-gateway
     ports:
       - "8285:80"
+      - "8288:88"
     depends_on:
       - admin-service
       - vendor-service

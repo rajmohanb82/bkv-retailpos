@@ -232,7 +232,8 @@ def accept_indent_to_production(indent_id: int):
         if not indent:
             raise HTTPException(status_code=404, detail="Outlet indent not found")
 
-        cnt = conn.execute("SELECT COUNT(*) AS c FROM factory_mod.production_orders").fetchone()["c"] + 106
+        max_row = conn.execute("SELECT MAX(CAST(SUBSTRING(prod_no FROM 'PRD-2026-(\\d+)') AS INTEGER)) AS m FROM factory_mod.production_orders").fetchone()
+        cnt = (max_row["m"] if max_row and max_row["m"] else 120) + 1
         prod_no = f"PRD-2026-{cnt:03d}"
         req_no = f"REQ-MAT-{prod_no}"
         
@@ -371,18 +372,42 @@ def pack_and_dispatch(prod_id: int, payload: DispatchPayload):
         exp = order["expiry_date"] or (mfg + timedelta(days=7))
         batch_no = order["batch_no"] or f"{order['fg_sku'][:6]}-{mfg.strftime('%y%m%d')}-{prod_id}"
 
-        # Inward Finished Goods into Target Store
-        conn.execute(
-            """
-            INSERT INTO stores_mod.stock_batches
-            (store_code, sku, item_name, category, batch_no, qty, uom, unit_cost, mfg_date, expiry_date, qc_status, source_ref)
-            VALUES (%s,%s,%s,'FG-Sweet',%s,%s,%s,%s,%s,%s,'PASSED',%s)
-            """,
-            (
-                payload.target_store_code, order["fg_sku"], order["fg_name"], batch_no,
-                qty, order["uom"], unit_cost, mfg, exp, order["prod_no"],
-            ),
-        )
+        # Determine target store code accurately
+        target_store = payload.target_store_code
+        if not target_store:
+            target_outlet = order.get("target_outlet_code") or "DEL01"
+            target_store = f"STR-{target_outlet}-BACK"
+        else:
+            clean = target_store.strip()
+            if clean in ("DEL01", "GUR02", "NOI03", "DEL02", "MUM01", "BLR01"):
+                target_store = f"STR-{clean}-BACK"
+            elif not clean.startswith("STR-"):
+                target_store = f"STR-{clean}-BACK"
+
+        # Check if existing batch exists in target store
+        existing_batch = conn.execute(
+            "SELECT id, qty FROM stores_mod.stock_batches WHERE store_code = %s AND batch_no = %s",
+            (target_store, batch_no),
+        ).fetchone()
+
+        if existing_batch:
+            conn.execute(
+                "UPDATE stores_mod.stock_batches SET qty = qty + %s, qc_status = 'PASSED' WHERE id = %s",
+                (qty, existing_batch["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO stores_mod.stock_batches
+                (store_code, sku, item_name, category, batch_no, qty, uom, unit_cost, mfg_date, expiry_date, qc_status, source_ref)
+                VALUES (%s,%s,%s,'FG-Sweet',%s,%s,%s,%s,%s,%s,'PASSED',%s)
+                """,
+                (
+                    target_store, order["fg_sku"], order["fg_name"], batch_no,
+                    qty, order["uom"], unit_cost, mfg, exp, order["prod_no"],
+                ),
+            )
+
         mov_no = f"MOV-FG-{int(datetime.now().timestamp() * 1000) % 1000000}"
         conn.execute(
             """
@@ -390,18 +415,21 @@ def pack_and_dispatch(prod_id: int, payload: DispatchPayload):
             (movement_no, movement_type, store_code, target_store_code, sku, batch_no, qty, uom, reason_code, ref_no, actor)
             VALUES (%s,'FG_INWARD',%s,'STR-MFG-COLD',%s,%s,%s,%s,'Factory FG Transfer',%s,%s)
             """,
-            (mov_no, payload.target_store_code, order["fg_sku"], batch_no, qty, order["uom"], order["prod_no"], payload.actor),
+            (mov_no, target_store, order["fg_sku"], batch_no, qty, order["uom"], order["prod_no"], payload.actor),
         )
 
-        # Also if linked to an outlet indent, mark indent FULFILLED
-        if order["source_ref"] and order["source_ref"].startswith("IND-"):
-            conn.execute("UPDATE pos_mod.outlet_indents SET status = 'FULFILLED' WHERE indent_no = %s", (order["source_ref"],))
+        # Fulfill linked outlet indents
+        if order["source_ref"]:
+            conn.execute(
+                "UPDATE pos_mod.outlet_indents SET status = 'FULFILLED' WHERE indent_no = %s OR (sku = %s AND status IN ('REQUESTED', 'IN_PRODUCTION'))",
+                (order["source_ref"], order["fg_sku"]),
+            )
 
         updated = conn.execute(
-            "UPDATE factory_mod.production_orders SET status = 'DISPATCHED', progress_pct = 100 WHERE id = %s RETURNING *",
-            (prod_id,),
+            "UPDATE factory_mod.production_orders SET status = 'DISPATCHED', progress_pct = 100, target_outlet_code = COALESCE(target_outlet_code, %s) WHERE id = %s RETURNING *",
+            (target_store.replace("STR-", "").replace("-BACK", ""), prod_id),
         ).fetchone()
-        return {"order": updated, "dispatched_to": payload.target_store_code, "batch_no": batch_no, "unit_cogs": unit_cost}
+        return {"order": updated, "dispatched_to": target_store, "batch_no": batch_no, "unit_cogs": unit_cost, "added_qty": qty}
 
 
 @app.get("/kettles")

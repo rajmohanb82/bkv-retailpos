@@ -21,11 +21,14 @@ import {
   MapPin,
   Clock,
   ShieldCheck,
+  Edit3,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
 import { BarcodeSvg } from "../components/BarcodeSvg";
 import { print40ColumnThermalSlip } from "../utils/posHardware";
+import { getActualDishImage, BIKANERVALA_LOGO_FALLBACK } from "../utils/dishImageResolver";
+import { ItemImageUploadModal } from "../components/ItemImageUploadModal";
 
 interface RestaurantKioskProps {
   activeOutlet: string;
@@ -49,7 +52,7 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
   outlets,
   actorName = "Self Service Kiosk",
 }) => {
-  const restOutlet = activeOutlet === "DEL01" || activeOutlet === "MFG01" ? "GUR02" : activeOutlet;
+  const restOutlet = activeOutlet === "MFG01" ? "DEL01" : activeOutlet;
   const outletObj = outlets.find((o) => o.code === restOutlet);
 
   const [step, setStep] = useState<KioskStep>("MENU");
@@ -64,6 +67,7 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
   const [paymentChoice, setPaymentChoice] = useState<"PAY_NOW_ONLINE" | "PAY_AT_COUNTER">("PAY_NOW_ONLINE");
   const [onlinePayMode, setOnlinePayMode] = useState<"UPI" | "Card">("UPI");
   const [confirmedOrderResult, setConfirmedOrderResult] = useState<any>(null);
+  const [editingItemForImage, setEditingItemForImage] = useState<ItemSku | null>(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -204,11 +208,10 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
       {/* Toast Alert */}
       {toast && (
         <div
-          className={`p-3 m-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg ${
-            toast.ok
-              ? "bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
-              : "bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-950 dark:text-rose-200"
-          }`}
+          className={`p-3 m-4 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg ${toast.ok
+            ? "bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+            : "bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-950 dark:text-rose-200"
+            }`}
         >
           <div className="flex items-center gap-2">
             {toast.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />}
@@ -249,22 +252,20 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
         <div className="flex items-center gap-2 bg-black/20 p-1.5 rounded-2xl border border-white/10 backdrop-blur-sm">
           <button
             onClick={() => setOrderType("DINE_IN")}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
-              orderType === "DINE_IN"
-                ? "bg-amber-400 text-[#081F5C] shadow-md"
-                : "text-white/80 hover:text-white"
-            }`}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${orderType === "DINE_IN"
+              ? "bg-amber-400 text-[#081F5C] shadow-md"
+              : "text-white/80 hover:text-white"
+              }`}
           >
             <Utensils className="w-3.5 h-3.5" />
             <span>Dine In (Table)</span>
           </button>
           <button
             onClick={() => setOrderType("TAKEAWAY")}
-            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
-              orderType === "TAKEAWAY"
-                ? "bg-amber-400 text-[#081F5C] shadow-md"
-                : "text-white/80 hover:text-white"
-            }`}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${orderType === "TAKEAWAY"
+              ? "bg-amber-400 text-[#081F5C] shadow-md"
+              : "text-white/80 hover:text-white"
+              }`}
           >
             <ShoppingBag className="w-3.5 h-3.5" />
             <span>Takeaway Parcel</span>
@@ -315,11 +316,10 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-black shrink-0 transition shadow-sm ${
-                    selectedCategory === cat
-                      ? "bg-gradient-to-r from-[#081F5C] to-[#1246A8] text-white"
-                      : "bg-white dark:bg-[#0C1324] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100"
-                  }`}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black shrink-0 transition shadow-sm ${selectedCategory === cat
+                    ? "bg-gradient-to-r from-[#081F5C] to-[#1246A8] text-white"
+                    : "bg-white dark:bg-[#0C1324] text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-100"
+                    }`}
                 >
                   {cat}
                 </button>
@@ -333,20 +333,32 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
                 return (
                   <div
                     key={dish.sku}
-                    className={`p-4 rounded-3xl border-2 transition flex flex-col justify-between text-left group ${
-                      inCart
-                        ? "border-[#1246A8] bg-blue-50/60 dark:bg-blue-950/40 shadow-md"
-                        : "border-slate-200/80 dark:border-slate-800 bg-white dark:bg-[#0C1324] hover:border-slate-300 shadow-sm"
-                    }`}
+                    className={`p-4 rounded-3xl border-2 transition flex flex-col justify-between text-left group ${inCart
+                      ? "border-[#1246A8] bg-blue-50/60 dark:bg-blue-950/40 shadow-md"
+                      : "border-slate-200/80 dark:border-slate-800 bg-white dark:bg-[#0C1324] hover:border-slate-300 shadow-sm"
+                      }`}
                   >
                     <div>
                       <div className="flex items-center justify-between gap-1 mb-2">
                         <span className="px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300">
                           {dish.kitchen_station || "Kitchen"}
                         </span>
-                        <span className="text-[10px] font-bold text-slate-400">
-                          {dish.sub_category}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-slate-400">
+                            {dish.sub_category}
+                          </span>
+                          <button
+                            type="button"
+                            title="Edit Item Photo (Browse from Computer)"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingItemForImage(dish);
+                            }}
+                            className="p-1 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-800 transition"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-slate-100 line-clamp-2 group-hover:text-[#1246A8] transition">
                         {dish.name}
@@ -603,21 +615,19 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
             <div className="flex justify-center gap-2">
               <button
                 onClick={() => setOnlinePayMode("UPI")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold border ${
-                  onlinePayMode === "UPI"
-                    ? "bg-[#081F5C] text-white border-[#081F5C]"
-                    : "bg-slate-100 text-slate-700 border-slate-200"
-                }`}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border ${onlinePayMode === "UPI"
+                  ? "bg-[#081F5C] text-white border-[#081F5C]"
+                  : "bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
               >
                 UPI QR Pay
               </button>
               <button
                 onClick={() => setOnlinePayMode("Card")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold border ${
-                  onlinePayMode === "Card"
-                    ? "bg-[#081F5C] text-white border-[#081F5C]"
-                    : "bg-slate-100 text-slate-700 border-slate-200"
-                }`}
+                className={`px-4 py-2 rounded-xl text-xs font-bold border ${onlinePayMode === "Card"
+                  ? "bg-[#081F5C] text-white border-[#081F5C]"
+                  : "bg-slate-100 text-slate-700 border-slate-200"
+                  }`}
               >
                 Debit / Credit Card Tap
               </button>
@@ -731,6 +741,21 @@ export const RestaurantKiosk: React.FC<RestaurantKioskProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Item Image Upload Modal (Search item, pencil icon, browse file, locked price) */}
+      {editingItemForImage && (
+        <ItemImageUploadModal
+          item={editingItemForImage}
+          allItems={menuItems}
+          onClose={() => setEditingItemForImage(null)}
+          onUpdated={(updated) => {
+            setMenuItems((prev) =>
+              prev.map((m) => (m.sku === updated.sku ? updated : m))
+            );
+            notify(true, `Photo for "${updated.name}" updated!`);
+          }}
+        />
       )}
     </div>
   );

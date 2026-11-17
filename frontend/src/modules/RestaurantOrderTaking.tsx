@@ -20,6 +20,7 @@ import {
   FileText,
   RefreshCw,
   ShoppingBag,
+  ChefHat,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
@@ -45,9 +46,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
   outlets,
   actorName = "Captain / Waiter",
 }) => {
-  const restOutlet = activeOutlet === "DEL01" || activeOutlet === "MFG01" ? "GUR02" : activeOutlet;
+  const restOutlet = activeOutlet === "MFG01" ? "DEL01" : activeOutlet;
   const outletObj = outlets.find((o) => o.code === restOutlet);
 
+  const [orderTakingTab, setOrderTakingTab] = useState<"entry" | "kds_progress">("entry");
   const [tables, setTables] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<ItemSku[]>([]);
   const [activeKots, setActiveKots] = useState<any[]>([]);
@@ -78,7 +80,13 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
       ]);
       setTables(tbls);
       setMenuItems(items.filter((i) => i.category === "FG-Rest"));
-      setActiveKots(kots.filter((k) => k.status === "ACTIVE" || k.status === "READY"));
+      setActiveKots(
+        kots.filter((k) =>
+          ["ACTIVE", "FIRED", "QUEUED", "COOKING", "PREPARING", "READY"].includes(
+            (k.status || "").toUpperCase()
+          )
+        )
+      );
     } catch (e: any) {
       notify(false, "Failed to load table & menu data: " + e.message);
     } finally {
@@ -88,6 +96,8 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
 
   useEffect(() => {
     loadData();
+    const timer = setInterval(loadData, 3500);
+    return () => clearInterval(timer);
   }, [restOutlet]);
 
   // Distinct Sections from Tables
@@ -214,6 +224,22 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
     }
   };
 
+  const handleMarkServed = async (kotId: number) => {
+    try {
+      await apiFetch(`/api/kot/kots/${kotId}/handover`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          handover_type: "CALL_WAITER_TABLE",
+          runner_name: actorName,
+        }),
+      });
+      notify(true, "Dish marked SERVED to table!");
+      loadData();
+    } catch (e: any) {
+      notify(false, e.message || "Failed to update handover");
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Toast Notification */}
@@ -257,6 +283,30 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-bold">
+            <button
+              onClick={() => setOrderTakingTab("entry")}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                orderTakingTab === "entry"
+                  ? "bg-[#081F5C] text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              Table Order Entry
+            </button>
+            <button
+              onClick={() => setOrderTakingTab("kds_progress")}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
+                orderTakingTab === "kds_progress"
+                  ? "bg-amber-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400"
+              }`}
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span>Kitchen KDS Progress ({activeKots.length})</span>
+            </button>
+          </div>
+
           <button
             onClick={loadData}
             disabled={loading}
@@ -268,8 +318,9 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
         </div>
       </div>
 
-      {/* 3-Column Layout: Table Selector | Food Catalog | Active Order & Cart */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      {/* VIEW 1: 3-Column Layout: Table Selector | Food Catalog | Active Order & Cart */}
+      {orderTakingTab === "entry" && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left Column: Tables Grid (3 Cols) */}
         <div className="lg:col-span-3 space-y-3">
           <div className="bg-white dark:bg-[#0C1324] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
@@ -354,28 +405,86 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
             </div>
           </div>
 
-          {/* Running KOTs for Table */}
+          {/* Running KOTs for Table with Live KDS Cooking Progress */}
           {tableKots.length > 0 && (
-            <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-3.5 space-y-2">
+            <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-3.5 space-y-3">
               <div className="flex items-center justify-between text-xs font-bold text-amber-900 dark:text-amber-300">
                 <span className="flex items-center gap-1.5">
-                  <Flame className="w-3.5 h-3.5 text-amber-600" />
-                  Live Running KOTs ({tableKots.length})
+                  <Flame className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                  Kitchen KDS Progress ({tableKots.length} KOTs)
                 </span>
-                <span className="font-mono">{selectedTable}</span>
+                <span className="font-mono bg-white dark:bg-slate-900 px-2 py-0.5 rounded-lg border border-amber-300">
+                  {selectedTable}
+                </span>
               </div>
-              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+
+              <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                 {tableKots.map((k) => (
                   <div
                     key={k.id}
-                    className="p-2 rounded-xl bg-white dark:bg-[#0B1324] border border-amber-200 dark:border-amber-800 text-[11px] space-y-1"
+                    className="p-2.5 rounded-xl bg-white dark:bg-[#0B1324] border border-amber-200 dark:border-amber-800 text-xs space-y-2 shadow-sm"
                   >
-                    <div className="flex justify-between font-mono font-bold text-[#081F5C] dark:text-sky-300">
-                      <span>{k.kot_no}</span>
-                      <span>{formatINR(k.total_amount)}</span>
+                    <div className="flex justify-between items-center font-mono font-bold text-[#081F5C] dark:text-sky-300">
+                      <span className="text-[11px]">{k.kot_no}</span>
+                      <span
+                        className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                          k.status === "READY"
+                            ? "bg-emerald-100 text-emerald-800 animate-bounce"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {k.status}
+                      </span>
                     </div>
-                    <div className="text-slate-600 dark:text-slate-400 text-[10px]">
-                      {(k.items || []).map((it: any) => `${it.qty}x ${it.name}`).join(", ")}
+
+                    {/* Line Items Cooking Progress */}
+                    <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      {(k.items || []).map((it: any, idx: number) => {
+                        const stStatus = it.station_status || "Queued";
+                        const isReady = stStatus === "Ready";
+                        const isCooking = stStatus === "Preparing" || stStatus === "Cooking";
+                        const pct = isReady ? 100 : isCooking ? 65 : 25;
+
+                        return (
+                          <div key={idx} className="space-y-1">
+                            <div className="flex justify-between items-center text-[11px]">
+                              <span className="font-bold text-slate-800 dark:text-slate-200">
+                                {it.qty}× {it.name}
+                              </span>
+                              <span className="text-[10px] font-semibold text-slate-500">
+                                [{it.station || "Kitchen"}]
+                              </span>
+                            </div>
+
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span
+                                className={`font-semibold ${
+                                  isReady
+                                    ? "text-emerald-600 dark:text-emerald-400 font-bold"
+                                    : isCooking
+                                    ? "text-amber-600 dark:text-amber-400 font-bold"
+                                    : "text-sky-600 dark:text-sky-400"
+                                }`}
+                              >
+                                {isReady ? "✓ Plated & Ready!" : isCooking ? "🔥 Cooking in Wok" : "⏱️ Queued in KDS"}
+                              </span>
+                              <span className="font-mono text-slate-400">{pct}%</span>
+                            </div>
+
+                            <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  isReady
+                                    ? "bg-emerald-500 w-full"
+                                    : isCooking
+                                    ? "bg-gradient-to-r from-amber-500 to-orange-500 w-[65%] animate-pulse"
+                                    : "bg-sky-500 w-[25%]"
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -682,6 +791,166 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
           </div>
         </div>
       </div>
+      )}
+
+      {/* VIEW 2: KITCHEN KOT KDS LIVE COOKING PROGRESS DISPLAY */}
+      {orderTakingTab === "kds_progress" && (
+        <div className="space-y-4">
+          {/* Header Summary Bar */}
+          <div className="bg-white dark:bg-[#0C1324] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-[#081F5C] dark:text-white flex items-center gap-2">
+                <ChefHat className="w-4 h-4 text-amber-500" />
+                <span>Kitchen KOT KDS Live Preparation Progress ({activeKots.length} Active Orders)</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Real-time tracking of dishes across Kitchen Stations • Informs order taking staff when dishes are ready to serve
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500">
+                Outlet: <b className="text-[#081F5C] dark:text-sky-300">{restOutlet}</b>
+              </span>
+            </div>
+          </div>
+
+          {/* Active Table Orders Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activeKots.map((k) => {
+              const allItems = k.items || [];
+              const readyCount = allItems.filter((i: any) => i.station_status === "Ready").length;
+              const isAllReady = allItems.length > 0 && readyCount === allItems.length;
+
+              return (
+                <div
+                  key={k.id}
+                  className={`rounded-2xl border p-4 shadow-sm space-y-3 transition ${
+                    isAllReady
+                      ? "bg-emerald-50/70 border-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-700"
+                      : "bg-white dark:bg-[#0C1324] border-slate-200 dark:border-slate-800"
+                  }`}
+                >
+                  <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-sm text-[#081F5C] dark:text-sky-300">
+                          {k.kot_no}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-lg bg-[#081F5C] text-white text-[10px] font-mono font-bold">
+                          Table: {k.table_code}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Captain / Waiter: <b>{k.captain_name || "Order Boy"}</b>
+                      </div>
+                    </div>
+
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        isAllReady
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse"
+                          : "bg-amber-100 text-amber-800 border border-amber-300"
+                      }`}
+                    >
+                      {isAllReady ? "ALL DISHES READY" : k.status}
+                    </span>
+                  </div>
+
+                  {/* Dishes and their cooking progress */}
+                  <div className="space-y-3">
+                    {allItems.map((it: any, idx: number) => {
+                      const stStatus = it.station_status || "Queued";
+                      const isReady = stStatus === "Ready";
+                      const isCooking = stStatus === "Preparing" || stStatus === "Cooking";
+                      const pct = isReady ? 100 : isCooking ? 65 : 25;
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`p-2.5 rounded-xl border text-xs space-y-1.5 ${
+                            isReady
+                              ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800/60"
+                              : isCooking
+                              ? "bg-amber-50/60 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800/60"
+                              : "bg-slate-50 border-slate-200 dark:bg-slate-800/40 dark:border-slate-700"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold text-slate-900 dark:text-white">
+                              {it.qty}× {it.name}
+                            </span>
+                            <span className="text-[10px] font-semibold text-slate-500 font-mono">
+                              [{it.station || "Kitchen"}]
+                            </span>
+                          </div>
+
+                          {it.modifiers && (
+                            <div className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">
+                              Note: {it.modifiers}
+                            </div>
+                          )}
+
+                          <div className="flex justify-between items-center text-[10px]">
+                            <span
+                              className={`font-semibold ${
+                                isReady
+                                  ? "text-emerald-700 dark:text-emerald-400 font-extrabold flex items-center gap-1"
+                                  : isCooking
+                                  ? "text-amber-700 dark:text-amber-400 font-bold"
+                                  : "text-sky-700 dark:text-sky-400"
+                              }`}
+                            >
+                              {isReady ? "✓ Plated & Ready for Service" : isCooking ? "🔥 Cooking in Wok/Tandoor" : "⏱️ Queued in Kitchen"}
+                            </span>
+                            <span className="font-mono text-slate-500 font-bold">{pct}%</span>
+                          </div>
+
+                          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isReady
+                                  ? "bg-emerald-500 w-full"
+                                  : isCooking
+                                  ? "bg-gradient-to-r from-amber-500 to-orange-500 w-[65%] animate-pulse"
+                                  : "bg-sky-500 w-[25%]"
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Actions for Table */}
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-400">
+                      Total: {formatINR(k.total_amount)}
+                    </span>
+                    <button
+                      onClick={() => handleMarkServed(k.id)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition"
+                    >
+                      Serve to Table
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {activeKots.length === 0 && (
+              <div className="col-span-full py-16 text-center text-slate-400 bg-white dark:bg-[#0C1324] border border-slate-200 dark:border-slate-800 rounded-3xl">
+                <ChefHat className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <div className="font-bold text-sm text-slate-600 dark:text-slate-300">
+                  No active orders in Kitchen right now
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  Place an order from the Table Order Entry tab to see live cooking progress here
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

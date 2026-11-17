@@ -189,18 +189,21 @@ def fire_kot(payload: KotCreate):
         total = 0.0
         for item in payload.items:
             meta = conn.execute(
-                "SELECT name, selling_price, kitchen_station FROM admin_mod.items WHERE sku = %s",
+                "SELECT name, selling_price, kitchen_station, category, sub_category FROM admin_mod.items WHERE sku = %s",
                 (item["sku"],),
             ).fetchone()
             price = float(item.get("unit_price", meta["selling_price"] if meta else 150))
             qty = float(item.get("qty", 1))
             total += price * qty
+            station_name = (meta["kitchen_station"] if (meta and meta["kitchen_station"]) else item.get("station", "North Indian Main"))
+            sub_cat = (meta["sub_category"] if (meta and meta["sub_category"]) else item.get("category", ""))
             enriched.append({
                 "sku": item["sku"],
                 "name": meta["name"] if meta else item.get("name", item["sku"]),
                 "qty": qty,
                 "unit_price": price,
-                "station": meta["kitchen_station"] if (meta and meta["kitchen_station"]) else item.get("station", "Tandoor"),
+                "station": station_name,
+                "category": sub_cat,
                 "modifiers": item.get("modifiers", "Standard"),
                 "course": item.get("course", "Main"),
                 "station_status": "Queued",
@@ -431,18 +434,21 @@ def place_table_order(payload: TableOrderPayload):
         total = 0.0
         for item in payload.items:
             meta = conn.execute(
-                "SELECT name, selling_price, kitchen_station FROM admin_mod.items WHERE sku = %s",
+                "SELECT name, selling_price, kitchen_station, category, sub_category FROM admin_mod.items WHERE sku = %s",
                 (item["sku"],),
             ).fetchone()
             price = float(item.get("unit_price", meta["selling_price"] if meta else 150))
             qty = float(item.get("qty", 1))
             total += price * qty
+            station_name = (meta["kitchen_station"] if (meta and meta["kitchen_station"]) else item.get("station", "North Indian Main"))
+            sub_cat = (meta["sub_category"] if (meta and meta["sub_category"]) else item.get("category", ""))
             enriched.append({
                 "sku": item["sku"],
                 "name": meta["name"] if meta else item.get("name", item["sku"]),
                 "qty": qty,
                 "unit_price": price,
-                "station": meta["kitchen_station"] if (meta and meta["kitchen_station"]) else item.get("station", "Main Kitchen"),
+                "station": station_name,
+                "category": sub_cat,
                 "modifiers": item.get("modifiers", payload.order_notes or "Standard"),
                 "course": item.get("course", "Main"),
                 "station_status": "Queued",

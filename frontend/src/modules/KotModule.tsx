@@ -35,6 +35,133 @@ const ALL_KITCHEN_STATIONS = [
   "Pantry & Bakery",
 ];
 
+export const getMatchingCounter = (station?: string, name?: string, category?: string): string => {
+  const s = (station || "").trim().toLowerCase();
+  const n = (name || "").trim().toLowerCase();
+  const c = (category || "").trim().toLowerCase();
+
+  if (
+    s.includes("chaat") ||
+    n.includes("chaat") ||
+    n.includes("tikki") ||
+    n.includes("bhalla") ||
+    n.includes("golgappa") ||
+    n.includes("samosa") ||
+    n.includes("kachori") ||
+    n.includes("papdi") ||
+    n.includes("bhel")
+  ) {
+    return "Chaat & Snacks";
+  }
+  if (
+    s.includes("tandoor") ||
+    n.includes("tandoor") ||
+    n.includes("naan") ||
+    n.includes("roti") ||
+    n.includes("kulcha") ||
+    n.includes("paratha") ||
+    n.includes("tikka") ||
+    n.includes("chaap")
+  ) {
+    return "Tandoor & Breads";
+  }
+  if (
+    s.includes("south indian") ||
+    n.includes("dosa") ||
+    n.includes("idli") ||
+    n.includes("vada") ||
+    n.includes("uttapam") ||
+    n.includes("sambhar")
+  ) {
+    return "South Indian";
+  }
+  if (
+    s.includes("thali") ||
+    n.includes("thali") ||
+    n.includes("combo") ||
+    n.includes("platter") ||
+    n.includes("deluxe meal")
+  ) {
+    return "Thali & Combo";
+  }
+  if (
+    s.includes("curry") ||
+    s.includes("main kitchen") ||
+    s.includes("north indian") ||
+    n.includes("dal") ||
+    n.includes("paneer") ||
+    n.includes("chole") ||
+    n.includes("sabzi") ||
+    n.includes("curry") ||
+    n.includes("rice") ||
+    n.includes("biryani") ||
+    n.includes("pulao") ||
+    n.includes("kofta") ||
+    n.includes("korma")
+  ) {
+    return "North Indian Main";
+  }
+  if (
+    s.includes("chinese") ||
+    s.includes("fast food") ||
+    s.includes("continental") ||
+    n.includes("noodle") ||
+    n.includes("manchurian") ||
+    n.includes("burger") ||
+    n.includes("pizza") ||
+    n.includes("sandwich") ||
+    n.includes("fried rice") ||
+    n.includes("spring roll") ||
+    n.includes("pasta") ||
+    n.includes("fries")
+  ) {
+    return "Continental & Fast Food";
+  }
+  if (
+    s.includes("beverage") ||
+    s.includes("lassi") ||
+    n.includes("lassi") ||
+    n.includes("tea") ||
+    n.includes("chai") ||
+    n.includes("coffee") ||
+    n.includes("shake") ||
+    n.includes("juice") ||
+    n.includes("cold drink") ||
+    n.includes("soda") ||
+    n.includes("water") ||
+    n.includes("chaas")
+  ) {
+    return "Beverages & Lassi";
+  }
+  if (
+    s.includes("dessert") ||
+    s.includes("mithai") ||
+    s.includes("sweet") ||
+    c.includes("sweet") ||
+    n.includes("halwa") ||
+    n.includes("jamun") ||
+    n.includes("kulfi") ||
+    n.includes("rasgulla") ||
+    n.includes("jalebi") ||
+    n.includes("ice cream") ||
+    n.includes("kheer")
+  ) {
+    return "Mithai & Desserts";
+  }
+  if (
+    s.includes("pantry") ||
+    s.includes("bakery") ||
+    n.includes("bread") ||
+    n.includes("toast") ||
+    n.includes("cake") ||
+    n.includes("cookie") ||
+    n.includes("rusk")
+  ) {
+    return "Pantry & Bakery";
+  }
+  return "North Indian Main";
+};
+
 const RESTAURANT_CATEGORIES = [
   "All Categories",
   "Soups & Shorba",
@@ -60,7 +187,9 @@ const RESTAURANT_CATEGORIES = [
 ];
 
 export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
-  const kotOutlet = activeOutlet === "MFG01" ? "GUR02" : activeOutlet;
+  const [kotOutlet, setKotOutlet] = useState<string>(
+    activeOutlet === "MFG01" ? "DEL01" : activeOutlet
+  );
   const [view, setView] = useState<"floor" | "kds">("floor");
   const [tables, setTables] = useState<any[]>([]);
   const [kots, setKots] = useState<any[]>([]);
@@ -91,14 +220,20 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
       ]);
       setTables(tbls);
       setKots(kList);
-      setMenuItems(catalog.filter((i) => i.category === "FG-Rest" || i.item_type === "Prepared Food"));
+      setMenuItems(catalog.filter((i) => i.category === "FG-Rest"));
     } catch (e: any) {
       console.error(e);
     }
   };
 
   useEffect(() => {
+    setKotOutlet(activeOutlet === "MFG01" ? "DEL01" : activeOutlet);
+  }, [activeOutlet]);
+
+  useEffect(() => {
     load();
+    const timer = setInterval(load, 4000);
+    return () => clearInterval(timer);
   }, [kotOutlet]);
 
   const notify = (ok: boolean, msg: string) => {
@@ -216,8 +351,17 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
   };
 
   const activeKots = kots.filter(
-    (k) => k.status === "ACTIVE" || k.status === "READY" || k.status === "SERVED"
+    (k) =>
+      ["ACTIVE", "FIRED", "QUEUED", "COOKING", "PREPARING", "READY", "SERVED"].includes(
+        (k.status || "").toUpperCase()
+      )
   );
+
+  const getElapsedMins = (createdAt?: string) => {
+    if (!createdAt) return 0;
+    const diff = Date.now() - new Date(createdAt).getTime();
+    return Math.max(0, Math.floor(diff / 60000));
+  };
 
   // Filter menu items
   const filteredMenuItems = menuItems.filter((m) => {
@@ -279,6 +423,16 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <select
+            value={kotOutlet}
+            onChange={(e) => setKotOutlet(e.target.value)}
+            className="text-xs font-bold px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 outline-none"
+          >
+            <option value="DEL01">DEL01 - Connaught Place</option>
+            <option value="GUR02">GUR02 - CyberHub</option>
+            <option value="JAI03">JAI03 - Jaipur</option>
+            <option value="NOI04">NOI04 - Noida</option>
+          </select>
           <button
             onClick={injectAggregatorOrder}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-bold hover:bg-rose-100"
@@ -514,7 +668,8 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
               const stationItems: any[] = [];
               activeKots.forEach((k) => {
                 (k.items || []).forEach((it: any, idx: number) => {
-                  if (it.station === st) {
+                  const matched = getMatchingCounter(it.station, it.name, it.category);
+                  if (matched === st) {
                     stationItems.push({ kot: k, item: it, idx });
                   }
                 });
@@ -534,13 +689,20 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
 
                   <div className="space-y-2.5 max-h-[460px] overflow-y-auto">
                     {stationItems.map((entry, i) => {
-                      const isReady = entry.item.station_status === "Ready";
+                      const stStatus = entry.item.station_status || "Queued";
+                      const isReady = stStatus === "Ready";
+                      const isPreparing = stStatus === "Preparing" || stStatus === "Cooking";
+                      const elapsed = getElapsedMins(entry.kot.created_at);
+                      const progressPct = isReady ? 100 : isPreparing ? 65 : 25;
+
                       return (
                         <div
                           key={i}
                           className={`p-3.5 rounded-2xl border text-xs space-y-2.5 transition ${
                             isReady
                               ? "bg-emerald-950/40 border-emerald-500/50"
+                              : isPreparing
+                              ? "bg-amber-950/30 border-amber-500/50"
                               : "bg-slate-800/80 border-slate-700"
                           }`}
                         >
@@ -548,13 +710,61 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
                             <span className="font-mono font-bold text-amber-300">
                               {entry.kot.kot_no} ({entry.kot.table_code})
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 font-semibold text-slate-300">
-                              {entry.kot.order_source}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-bold font-mono ${
+                                  elapsed >= 20
+                                    ? "bg-rose-500/30 text-rose-300 animate-pulse border border-rose-500/50"
+                                    : elapsed >= 10
+                                    ? "bg-amber-500/20 text-amber-300"
+                                    : "bg-emerald-500/20 text-emerald-300"
+                                }`}
+                              >
+                                ⏱️ {elapsed}m
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 font-semibold text-slate-300">
+                                {entry.kot.order_source}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="font-bold text-sm text-white">
                             {entry.item.qty}× {entry.item.name}
+                          </div>
+
+                          {/* Cooking Progress Bar & Indicator */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px]">
+                              <span className="font-semibold text-slate-400">
+                                Preparation Progress:
+                              </span>
+                              <span
+                                className={`font-bold ${
+                                  isReady
+                                    ? "text-emerald-400"
+                                    : isPreparing
+                                    ? "text-amber-400"
+                                    : "text-sky-400"
+                                }`}
+                              >
+                                {isReady
+                                  ? "100% (Plated & Ready)"
+                                  : isPreparing
+                                  ? "65% (Cooking in Wok/Tandoor)"
+                                  : "25% (Queued in KDS)"}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  isReady
+                                    ? "bg-emerald-500 w-full"
+                                    : isPreparing
+                                    ? "bg-gradient-to-r from-amber-500 to-orange-500 w-[65%] animate-pulse"
+                                    : "bg-sky-500 w-[25%]"
+                                }`}
+                              />
+                            </div>
                           </div>
 
                           {entry.item.modifiers && (
@@ -565,19 +775,25 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
 
                           {/* Chef Status Control */}
                           <div className="flex gap-1.5 pt-1">
-                            {["Queued", "Preparing", "Ready"].map((s) => (
+                            {[
+                              { label: "Queued", val: "Queued" },
+                              { label: "🔥 Cooking", val: "Preparing" },
+                              { label: "✅ Ready", val: "Ready" },
+                            ].map((s) => (
                               <button
-                                key={s}
-                                onClick={() => updateKdsItem(entry.kot.id, entry.idx, s)}
+                                key={s.val}
+                                onClick={() => updateKdsItem(entry.kot.id, entry.idx, s.val)}
                                 className={`flex-1 py-1.5 rounded-xl text-[10px] font-bold transition ${
-                                  entry.item.station_status === s
-                                    ? s === "Ready"
+                                  stStatus === s.val || (s.val === "Preparing" && isPreparing)
+                                    ? s.val === "Ready"
                                       ? "bg-emerald-500 text-white shadow-sm"
+                                      : s.val === "Preparing"
+                                      ? "bg-amber-500 text-white shadow-sm"
                                       : "bg-sky-500 text-white shadow-sm"
                                     : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                                 }`}
                               >
-                                {s}
+                                {s.label}
                               </button>
                             ))}
                           </div>

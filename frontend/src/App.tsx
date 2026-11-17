@@ -25,6 +25,8 @@ import {
   Sparkles,
   Zap,
   BookOpen,
+  Radio,
+  ExternalLink,
 } from "lucide-react";
 import { apiFetch } from "./api";
 import { ModuleId, Outlet, BrandingConfig } from "./types";
@@ -35,6 +37,7 @@ import { RetailPos } from "./modules/RetailPos";
 import { RestaurantPos } from "./modules/RestaurantPos";
 import { RestaurantOrderTaking } from "./modules/RestaurantOrderTaking";
 import { RestaurantKiosk } from "./modules/RestaurantKiosk";
+import { PortraitKioskExpress } from "./modules/PortraitKioskExpress";
 import { ShopManager } from "./modules/ShopManager";
 import { OmsModule } from "./modules/OmsModule";
 import { StoresModule } from "./modules/StoresModule";
@@ -44,6 +47,7 @@ import { VendorModule } from "./modules/VendorModule";
 import { AdminModule } from "./modules/AdminModule";
 import { ItemAdminModule } from "./modules/ItemAdminModule";
 import { ReportsModule } from "./modules/ReportsModule";
+import { WalkieTalkieModule } from "./modules/WalkieTalkieModule";
 
 const NAV_ITEMS: { id: ModuleId; num: string; label: string; sub: string; icon: any }[] = [
   { id: "executive", num: "9", label: "Executive Dashboard", sub: "CXO & CO/FR/DO KPIs", icon: LayoutDashboard },
@@ -60,6 +64,7 @@ const NAV_ITEMS: { id: ModuleId; num: string; label: string; sub: string; icon: 
   { id: "admin", num: "8", label: "Admin & GSTN", sub: "Outlets, RBAC & Hardware", icon: ShieldCheck },
   { id: "item_admin", num: "8B", label: "Item Admin", sub: "Discounts, Combos & Rates", icon: Sparkles },
   { id: "reports", num: "10", label: "All Reports", sub: "GST, FSSAI Trace & CSV", icon: FileSpreadsheet },
+  { id: "walkie_talkie", num: "11", label: "Walkie-Talkie", sub: "Digital PTT Intercom", icon: Radio },
 ];
 
 const ROLE_DEFAULT_MODULE: Record<string, ModuleId> = {
@@ -77,17 +82,17 @@ const ROLE_DEFAULT_MODULE: Record<string, ModuleId> = {
 };
 
 const FALLBACK_ROLE_MODULES: Record<string, ModuleId[]> = {
-  "Super Admin": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "admin", "item_admin", "reports"],
-  "Director / Owner": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports"],
-  "Corporate Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports"],
-  "Location Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports"],
-  "Shop Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports"],
-  Cashier: ["pos"],
-  "Restaurant Cashier": ["rest_pos", "order_taking", "kiosk"],
-  "Production Manager": ["factory", "stores", "oms", "reports"],
-  Storekeeper: ["stores", "factory", "vendor", "reports"],
-  "Kitchen Captain": ["kot", "order_taking", "rest_pos"],
-  "Procurement Officer": ["vendor", "stores", "reports"],
+  "Super Admin": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "admin", "item_admin", "reports", "walkie_talkie"],
+  "Director / Owner": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports", "walkie_talkie"],
+  "Corporate Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports", "walkie_talkie"],
+  "Location Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports", "walkie_talkie"],
+  "Shop Manager": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "item_admin", "reports", "walkie_talkie"],
+  Cashier: ["pos", "walkie_talkie"],
+  "Restaurant Cashier": ["rest_pos", "order_taking", "kiosk", "walkie_talkie"],
+  "Production Manager": ["factory", "stores", "oms", "reports", "walkie_talkie"],
+  Storekeeper: ["stores", "factory", "vendor", "reports", "walkie_talkie"],
+  "Kitchen Captain": ["kot", "order_taking", "rest_pos", "walkie_talkie"],
+  "Procurement Officer": ["vendor", "stores", "reports", "walkie_talkie"],
 };
 
 interface SessionState {
@@ -108,14 +113,55 @@ export default function App() {
   const [storesSubTab, setStoresSubTab] = useState<"inbox" | "batches" | "bom" | "alerts" | "transfer">("inbox");
   const [factorySubTab, setFactorySubTab] = useState<"inbox" | "kettles" | "orders" | "qc" | "dispatch" | "tracker">("inbox");
   const [omsSubTab, setOmsSubTab] = useState<"aggregators" | "bulk" | "config">("aggregators");
-  const [expandedMenu, setExpandedMenu] = useState<Record<string, boolean>>({ stores: true, factory: true, oms: true });
+  const [adminSubTab, setAdminSubTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">("outlets");
+  const [shopSubTab, setShopSubTab] = useState<"stock" | "eod" | "shifts" | "promos" | "otp">("stock");
+  const [vendorSubTab, setVendorSubTab] = useState<"portal" | "tenders" | "vendors" | "pos" | "prices">("portal");
+  const [itemAdminSubTab, setItemAdminSubTab] = useState<"items" | "rates" | "promos" | "packages">("items");
+  const [expandedMenu, setExpandedMenu] = useState<Record<string, boolean>>({
+    stores: false,
+    factory: false,
+    oms: false,
+    admin: false,
+    shop: false,
+    vendor: false,
+    item_admin: false,
+  });
+
+  // Auto-scroll to top helper
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.documentElement.scrollTo({ top: 0, behavior: "smooth" });
+    document.body.scrollTo({ top: 0, behavior: "smooth" });
+    const mainEl = document.querySelector("main");
+    if (mainEl) mainEl.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const toggleDrawer = (moduleId: string) => {
+    setExpandedMenu((prev) => ({
+      ...prev,
+      [moduleId]: !prev[moduleId],
+    }));
+  };
+
+  useEffect(() => {
+    scrollToTop();
+  }, [
+    activeModule,
+    storesSubTab,
+    factorySubTab,
+    omsSubTab,
+    adminSubTab,
+    shopSubTab,
+    vendorSubTab,
+    itemAdminSubTab,
+  ]);
   const [branding, setBranding] = useState<BrandingConfig>({
     customer_name: "Bikanervala",
     customer_trade_name: "Bikanervala Foods Pvt Ltd",
     customer_logo_url: "/bikanervala-customer-logo.svg",
     customer_logo_dark_url: "/bikanervala-customer-logo-dark.svg",
     dual_logo_mode: true,
-    customer_logo_height_px: 36,
+    customer_logo_height_px: 44,
     brand_tagline: "Taste of Tradition & Trust",
   });
   const [outlets, setOutlets] = useState<Outlet[]>([]);
@@ -255,6 +301,22 @@ export default function App() {
     }
   };
 
+  // Dedicated Port 8288 or Standalone Kiosk Detection
+  const isKioskMode =
+    typeof window !== "undefined" &&
+    (window.location.port === "8288" ||
+      window.location.search.includes("kiosk=standalone") ||
+      window.location.search.includes("kiosk=portrait") ||
+      window.location.pathname.startsWith("/kiosk"));
+
+  if (isKioskMode) {
+    return (
+      <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#070B14]">
+        <PortraitKioskExpress isStandalone={true} activeOutlet={activeOutlet || "DEL01"} />
+      </div>
+    );
+  }
+
   if (!session) {
     return (
       <LoginScreen
@@ -299,9 +361,9 @@ export default function App() {
                   }
                   alt={branding?.customer_name || "Customer Brand"}
                   style={{
-                    height: `${Math.min(Math.max(branding?.customer_logo_height_px || 34, 26), 46)}px`,
+                    height: `${Math.min(Math.max(branding?.customer_logo_height_px || 44, 38), 54)}px`,
                   }}
-                  className="w-auto max-w-[100px] object-contain drop-shadow-sm transition-all"
+                  className="w-auto max-w-[130px] object-contain drop-shadow-sm transition-all"
                   onError={(e) => {
                     e.currentTarget.src = "/bikanervala-customer-logo.svg";
                   }}
@@ -309,14 +371,14 @@ export default function App() {
               </div>
 
               {/* Vertical Elegant Divider */}
-              <div className="h-6 w-px bg-slate-300 dark:bg-slate-700 flex-shrink-0 mx-0.5" />
+              <div className="h-8 w-px bg-slate-300 dark:bg-slate-700 flex-shrink-0 mx-1" />
 
               {/* Annavya ERP Platform Logo */}
               <div className="flex items-center justify-center">
                 <img
                   src={isDark ? "/annavya-logo-dark.png" : "/annavya-logo-light.png"}
                   alt="Annavya Food Retail ERP"
-                  className="h-8 w-auto max-w-[95px] object-contain drop-shadow-sm transition-all"
+                  className="h-10 w-auto max-w-[115px] object-contain drop-shadow-sm transition-all"
                 />
               </div>
             </div>
@@ -371,196 +433,442 @@ export default function App() {
             const isStores = item.id === "stores";
             const isFactory = item.id === "factory";
             const isOms = item.id === "oms";
-            const hasSubmenu = isStores || isFactory || isOms;
-            const isExpanded =
-              (isStores && (isActive || expandedMenu.stores)) ||
-              (isFactory && (isActive || expandedMenu.factory)) ||
-              (isOms && (isActive || expandedMenu.oms));
+            const isAdmin = item.id === "admin";
+            const isShop = item.id === "shop";
+            const isVendor = item.id === "vendor";
+            const isItemAdmin = item.id === "item_admin";
+            const hasSubmenu =
+              isStores || isFactory || isOms || isAdmin || isShop || isVendor || isItemAdmin;
+            const isExpanded = Boolean(expandedMenu[item.id]);
 
             return (
               <div key={item.id} className="space-y-1">
-                <button
-                  onClick={() => {
-                    setActiveModule(item.id);
-                    if (isStores) {
-                      setStoresSubTab("inbox");
-                      setExpandedMenu((prev) => ({ ...prev, stores: isActive ? !prev.stores : true }));
-                    }
-                    if (isFactory) {
-                      setFactorySubTab("inbox");
-                      setExpandedMenu((prev) => ({ ...prev, factory: isActive ? !prev.factory : true }));
-                    }
-                    if (isOms) {
-                      setOmsSubTab("aggregators");
-                      setExpandedMenu((prev) => ({ ...prev, oms: isActive ? !prev.oms : true }));
-                    }
-                    if (!hasSubmenu) setSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-left transition ${
+                <div
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl transition cursor-pointer select-none ${
                     isActive
                       ? "bg-[#081F5C] text-white shadow-md font-bold"
                       : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80"
                   }`}
+                  onClick={() => {
+                    scrollToTop();
+                    setActiveModule(item.id);
+                    if (hasSubmenu) {
+                      setExpandedMenu((prev) => ({
+                        ...prev,
+                        [item.id]: isActive ? !prev[item.id] : true,
+                      }));
+                    } else {
+                      setSidebarOpen(false);
+                    }
+                  }}
                 >
-                  <div
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      isActive
-                        ? "bg-white/20 text-white"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold truncate flex items-center gap-1.5">
-                      <span>{item.label}</span>
-                      <span
-                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded ${
-                          isActive
-                            ? "bg-white/20 text-white"
-                            : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                        }`}
-                      >
-                        {item.num}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div
-                      className={`text-[10px] truncate ${
-                        isActive ? "text-slate-200" : "text-slate-400 dark:text-slate-500"
+                      className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        isActive
+                          ? "bg-white/20 text-white"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
                       }`}
                     >
-                      {item.sub}
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold truncate flex items-center gap-1.5">
+                        <span>{item.label}</span>
+                        <span
+                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded ${
+                            isActive
+                              ? "bg-white/20 text-white"
+                              : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                          }`}
+                        >
+                          {item.num}
+                        </span>
+                      </div>
+                      <div
+                        className={`text-[10px] truncate ${
+                          isActive ? "text-slate-200" : "text-slate-400 dark:text-slate-500"
+                        }`}
+                      >
+                        {item.sub}
+                      </div>
                     </div>
                   </div>
+
                   {hasSubmenu ? (
-                    <ChevronRight
-                      className={`w-4 h-4 transition-transform duration-300 ${
-                        isExpanded
-                          ? `${isActive ? "text-white" : "text-slate-600 dark:text-slate-300"} rotate-90`
-                          : "text-slate-400 rotate-0"
+                    <button
+                      type="button"
+                      aria-label="Toggle submenu drawer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleDrawer(item.id);
+                      }}
+                      className={`p-1.5 rounded-xl transition-all duration-200 ${
+                        isActive
+                          ? "hover:bg-white/20 text-white"
+                          : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/60"
                       }`}
-                    />
+                    >
+                      <ChevronRight
+                        className={`w-4 h-4 transition-transform duration-300 ${
+                          isExpanded ? "rotate-90" : "rotate-0"
+                        }`}
+                      />
+                    </button>
                   ) : isActive ? (
                     <ChevronRight className="w-4 h-4 text-white" />
                   ) : null}
-                </button>
+                </div>
 
                 {/* Submenu under Stores with Smooth Foldable Drawer Animation */}
                 {isStores && (
                   <div
-                    className={`overflow-hidden transition-all duration-300 ease-in-out pl-6 pr-2 border-l-2 border-blue-200 dark:border-blue-900 ml-4 space-y-0.5 ${
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
                       isExpanded
-                        ? "max-h-96 opacity-100 py-1"
+                        ? "max-h-[500px] opacity-100 py-1"
                         : "max-h-0 opacity-0 py-0 pointer-events-none"
                     }`}
                   >
-                    {[
-                      { id: "inbox", label: "📥 Stores Inbox", sub: "Material Requisitions" },
-                      { id: "batches", label: "📦 Stock Batches", sub: "FEFO Inventory" },
-                      { id: "bom", label: "📋 BOM Exploder", sub: "Recipe Issuance" },
-                      { id: "alerts", label: "🔔 Alerts & Expiry", sub: "Dynamic ROP" },
-                      { id: "transfer", label: "🚚 Transfer (IST)", sub: "E-Way Bills" },
-                    ].map((sub) => {
-                      const isSubActive = isActive && storesSubTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveModule("stores");
-                            setStoresSubTab(sub.id as any);
-                            setSidebarOpen(false);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between ${
-                            isSubActive
-                              ? "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-sky-300 font-bold"
-                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          }`}
-                        >
-                          <span>{sub.label}</span>
-                          <span className="text-[9px] text-slate-400 font-normal">{sub.sub}</span>
-                        </button>
-                      );
-                    })}
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "inbox", label: "📥 Stores Inbox", sub: "Material Requisitions" },
+                        { id: "batches", label: "📦 Stock Batches", sub: "FEFO Inventory" },
+                        { id: "bom", label: "📋 BOM Exploder", sub: "Recipe Issuance" },
+                        { id: "alerts", label: "🔔 Alerts & Expiry", sub: "Dynamic ROP" },
+                        { id: "transfer", label: "🚚 Transfer (IST)", sub: "E-Way Bills" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && storesSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("stores");
+                              setStoresSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-blue-700 dark:text-sky-300 shadow-sm font-bold ring-1 ring-blue-200 dark:ring-blue-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-blue-600 dark:bg-sky-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
                 {/* Submenu under Sweet Factory with Smooth Foldable Drawer Animation */}
                 {isFactory && (
                   <div
-                    className={`overflow-hidden transition-all duration-300 ease-in-out pl-6 pr-2 border-l-2 border-amber-300 dark:border-amber-900 ml-4 space-y-0.5 ${
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
                       isExpanded
-                        ? "max-h-96 opacity-100 py-1"
+                        ? "max-h-[500px] opacity-100 py-1"
                         : "max-h-0 opacity-0 py-0 pointer-events-none"
                     }`}
                   >
-                    {[
-                      { id: "inbox", label: "📥 Factory Inbox", sub: "Orders & Indents" },
-                      { id: "kettles", label: "🔥 Live Kettles", sub: "Floor Telemetry" },
-                      { id: "orders", label: "📋 Batches & WIP", sub: "Active Sweets" },
-                      { id: "qc", label: "🔬 QC Lab Gate", sub: "Brix & Sensory" },
-                      { id: "dispatch", label: "🚚 Store Dispatch", sub: "Cold Room Transfer" },
-                      { id: "tracker", label: "📍 Workflow Stepper", sub: "7-Stage Tracker" },
-                    ].map((sub) => {
-                      const isSubActive = isActive && factorySubTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveModule("factory");
-                            setFactorySubTab(sub.id as any);
-                            setSidebarOpen(false);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between ${
-                            isSubActive
-                              ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 font-bold"
-                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          }`}
-                        >
-                          <span>{sub.label}</span>
-                          <span className="text-[9px] text-slate-400 font-normal">{sub.sub}</span>
-                        </button>
-                      );
-                    })}
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "inbox", label: "📥 Factory Inbox", sub: "Orders & Indents" },
+                        { id: "kettles", label: "🔥 Live Kettles", sub: "Floor Telemetry" },
+                        { id: "orders", label: "📋 Batches & WIP", sub: "Active Sweets" },
+                        { id: "qc", label: "🔬 QC Lab Gate", sub: "Brix & Sensory" },
+                        { id: "dispatch", label: "🚚 Store Dispatch", sub: "Cold Room Transfer" },
+                        { id: "tracker", label: "📍 Workflow Stepper", sub: "7-Stage Tracker" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && factorySubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("factory");
+                              setFactorySubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-sm font-bold ring-1 ring-amber-200 dark:ring-amber-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-amber-600 dark:bg-amber-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
                 {/* Submenu under OMS with Smooth Foldable Drawer Animation */}
                 {isOms && (
                   <div
-                    className={`overflow-hidden transition-all duration-300 ease-in-out pl-6 pr-2 border-l-2 border-orange-300 dark:border-orange-900 ml-4 space-y-0.5 ${
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
                       isExpanded
-                        ? "max-h-96 opacity-100 py-1"
+                        ? "max-h-[500px] opacity-100 py-1"
                         : "max-h-0 opacity-0 py-0 pointer-events-none"
                     }`}
                   >
-                    {[
-                      { id: "aggregators", label: "🛵 Zomato & Swiggy Inbox", sub: "Live Orders & Alarm" },
-                      { id: "bulk", label: "🎁 Bulk Hampers & Gifting", sub: "Marriage & Corporate" },
-                      { id: "config", label: "⚙️ Aggregator API Config", sub: "Webhooks & SLA Keys" },
-                    ].map((sub) => {
-                      const isSubActive = isActive && omsSubTab === sub.id;
-                      return (
-                        <button
-                          key={sub.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setActiveModule("oms");
-                            setOmsSubTab(sub.id as any);
-                            setSidebarOpen(false);
-                          }}
-                          className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between ${
-                            isSubActive
-                              ? "bg-orange-100 text-orange-950 dark:bg-orange-950/80 dark:text-amber-200 font-bold"
-                              : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          }`}
-                        >
-                          <span>{sub.label}</span>
-                          <span className="text-[9px] text-slate-400 font-normal">{sub.sub}</span>
-                        </button>
-                      );
-                    })}
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "aggregators", label: "🛵 Zomato & Swiggy Inbox", sub: "Live Orders & Alarm" },
+                        { id: "bulk", label: "🎁 Bulk Hampers & Gifting", sub: "Marriage & Corporate" },
+                        { id: "config", label: "⚙️ Aggregator API Config", sub: "Webhooks & SLA Keys" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && omsSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("oms");
+                              setOmsSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-orange-700 dark:text-orange-300 shadow-sm font-bold ring-1 ring-orange-200 dark:ring-orange-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-orange-600 dark:bg-orange-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Submenu under Shop Manager with Smooth Foldable Drawer Animation */}
+                {isShop && (
+                  <div
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
+                      isExpanded
+                        ? "max-h-[500px] opacity-100 py-1"
+                        : "max-h-0 opacity-0 py-0 pointer-events-none"
+                    }`}
+                  >
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "stock", label: "📦 Stock & Deficits", sub: "Store Front Par Levels" },
+                        { id: "eod", label: "🌙 EoD Indents", sub: "Next Day Requisitions" },
+                        { id: "shifts", label: "💰 Shift Handovers", sub: "Opening Float & Remittance" },
+                        { id: "promos", label: "🏷️ Promo Rules", sub: "Festive & Owner Offers" },
+                        { id: "otp", label: "📱 SMS Approvals", sub: "Manager OTP Verification" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && shopSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("shop");
+                              setShopSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-emerald-700 dark:text-emerald-300 shadow-sm font-bold ring-1 ring-emerald-200 dark:ring-emerald-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-emerald-600 dark:bg-emerald-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Submenu under Vendor & RFQ with Smooth Foldable Drawer Animation */}
+                {isVendor && (
+                  <div
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
+                      isExpanded
+                        ? "max-h-[500px] opacity-100 py-1"
+                        : "max-h-0 opacity-0 py-0 pointer-events-none"
+                    }`}
+                  >
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "portal", label: "🌐 Vendor Portal", sub: "Bills, POs & Delivery Inbox" },
+                        { id: "tenders", label: "⚖️ Tenders & RFQs", sub: "Reverse Bidding" },
+                        { id: "vendors", label: "🏢 Vendor Directory", sub: "Document Vault & KYC" },
+                        { id: "pos", label: "📄 Purchase Orders", sub: "Line Approval & GRN Match" },
+                        { id: "prices", label: "💹 Price Masters", sub: "Contracted Rates & Slabs" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && vendorSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("vendor");
+                              setVendorSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-sky-700 dark:text-sky-300 shadow-sm font-bold ring-1 ring-sky-200 dark:ring-sky-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-sky-600 dark:bg-sky-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Submenu under Admin & GSTN with Smooth Foldable Drawer Animation */}
+                {isAdmin && (
+                  <div
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
+                      isExpanded
+                        ? "max-h-[600px] opacity-100 py-1"
+                        : "max-h-0 opacity-0 py-0 pointer-events-none"
+                    }`}
+                  >
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "outlets", label: "🏢 Outlets & GSTN", sub: "Locations & GSP" },
+                        { id: "restaurant", label: "🍽️ Restaurant Admin", sub: "Floors & Counters" },
+                        { id: "branding", label: "🎨 Brand & Logo", sub: "Dual-Logo Proportions" },
+                        { id: "payments", label: "💳 Payment Gateways", sub: "UPI, EDC POS & Coupons" },
+                        { id: "rbac", label: "👥 Users & MFA", sub: "RBAC & Security Keys" },
+                        { id: "sequences", label: "#️⃣ Code Sequences", sub: "Master Barcode Prefixes" },
+                        { id: "hardware", label: "🖨️ POS & Kiosk Hardware", sub: "Printers, EDC & Display" },
+                        { id: "config", label: "⚙️ System Config", sub: "Audit & Operational Rules" },
+                        { id: "backups", label: "💾 DB Backups", sub: "Disaster Recovery" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && adminSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("admin");
+                              setAdminSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-sm font-bold ring-1 ring-purple-200 dark:ring-purple-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-purple-600 dark:bg-purple-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Submenu under Item Admin with Smooth Foldable Drawer Animation */}
+                {isItemAdmin && (
+                  <div
+                    className={`overflow-hidden transition-all duration-300 ease-in-out ml-3 mr-1 space-y-1 ${
+                      isExpanded
+                        ? "max-h-[500px] opacity-100 py-1"
+                        : "max-h-0 opacity-0 py-0 pointer-events-none"
+                    }`}
+                  >
+                    <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
+                      {[
+                        { id: "items", label: "📦 Item Master", sub: "Catalog & Excel Bulk Upload" },
+                        { id: "rates", label: "💰 Dynamic Rates", sub: "Slabs & Customer Pricing" },
+                        { id: "promos", label: "🏷️ Promo Schemes", sub: "Festive, Owner & Staff Deals" },
+                        { id: "packages", label: "🎁 Festive Packages", sub: "Custom Hampers & Thal Combos" },
+                      ].map((sub) => {
+                        const isSubActive = isActive && itemAdminSubTab === sub.id;
+                        return (
+                          <button
+                            key={sub.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              scrollToTop();
+                              setActiveModule("item_admin");
+                              setItemAdminSubTab(sub.id as any);
+                              setSidebarOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 rounded-xl text-[11px] font-semibold transition flex items-center justify-between group ${
+                              isSubActive
+                                ? "bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-300 shadow-sm font-bold ring-1 ring-rose-200 dark:ring-rose-900"
+                                : "text-slate-600 dark:text-slate-400 hover:bg-white/60 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-slate-100"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-transform ${
+                                  isSubActive ? "bg-rose-600 dark:bg-rose-400 scale-125" : "bg-slate-300 dark:bg-slate-600 group-hover:scale-110"
+                                }`}
+                              />
+                              <span className="truncate">{sub.label}</span>
+                            </div>
+                            <span className="text-[9px] text-slate-400 font-normal truncate ml-1">{sub.sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -710,6 +1018,19 @@ export default function App() {
             )}
 
             <button
+              onClick={() => setActiveModule("walkie_talkie")}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${
+                activeModule === "walkie_talkie"
+                  ? "bg-amber-500 text-white font-black ring-2 ring-amber-300"
+                  : "bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100"
+              }`}
+              title="Push-to-Talk Digital Store Intercom"
+            >
+              <Radio className="w-3.5 h-3.5 animate-pulse text-amber-600 dark:text-amber-400" />
+              <span className="hidden sm:inline">Walkie-Talkie</span>
+            </button>
+
+            <button
               onClick={() => setShowDocsModal(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 transition shadow-sm"
               title="System Architecture & Visual Icon-Based Workflows Guide"
@@ -774,13 +1095,48 @@ export default function App() {
             />
           )}
           {activeModule === "kiosk" && (
-            <RestaurantKiosk
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between p-4 rounded-3xl bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/40 border border-amber-200 dark:border-amber-800 shadow-sm gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-400 text-[#081F5C] flex items-center justify-center font-bold shadow">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-[#081F5C] dark:text-amber-200 flex items-center gap-2">
+                      <span>Express Touch Kiosk (Connected to Central DB & Microservices)</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-black uppercase">
+                        Port :8288 Live
+                      </span>
+                    </h4>
+                    <p className="text-xs text-amber-900/80 dark:text-amber-300">
+                      Optimized for vertical portrait touchscreen kiosk hardware. Launch fullscreen standalone kiosk below.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={`http://${window.location.hostname}:8288`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 rounded-2xl bg-[#081F5C] text-white font-bold text-xs shadow-md hover:bg-[#1246A8] transition flex items-center gap-1.5"
+                >
+                  <span>🚀 Open Dedicated Kiosk (Port :8288)</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                </a>
+              </div>
+
+              <PortraitKioskExpress
+                isStandalone={false}
+                activeOutlet={activeOutlet}
+              />
+            </div>
+          )}
+          {activeModule === "shop" && (
+            <ShopManager
+              key={shopSubTab}
               activeOutlet={activeOutlet}
-              outlets={outlets}
-              actorName={session.user.full_name}
+              initialTab={shopSubTab}
             />
           )}
-          {activeModule === "shop" && <ShopManager activeOutlet={activeOutlet} />}
           {activeModule === "oms" && (
             <OmsModule
               key={omsSubTab}
@@ -791,10 +1147,32 @@ export default function App() {
           {activeModule === "stores" && <StoresModule key={storesSubTab} initialTab={storesSubTab} />}
           {activeModule === "factory" && <FactoryModule key={factorySubTab} initialTab={factorySubTab} />}
           {activeModule === "kot" && <KotModule activeOutlet={activeOutlet} />}
-          {activeModule === "vendor" && <VendorModule />}
-          {activeModule === "admin" && <AdminModule onOutletsUpdated={loadOutlets} />}
-          {activeModule === "item_admin" && <ItemAdminModule />}
+          {activeModule === "vendor" && (
+            <VendorModule
+              key={vendorSubTab}
+              initialTab={vendorSubTab}
+            />
+          )}
+          {activeModule === "admin" && (
+            <AdminModule
+              key={adminSubTab}
+              initialTab={adminSubTab}
+              onOutletsUpdated={loadOutlets}
+            />
+          )}
+          {activeModule === "item_admin" && (
+            <ItemAdminModule
+              key={itemAdminSubTab}
+              initialTab={itemAdminSubTab}
+            />
+          )}
           {activeModule === "reports" && <ReportsModule />}
+          {activeModule === "walkie_talkie" && (
+            <WalkieTalkieModule
+              currentUser={session?.user}
+              activeOutlet={activeOutlet}
+            />
+          )}
         </main>
       </div>
 

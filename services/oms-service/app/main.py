@@ -5,6 +5,11 @@ from pydantic import BaseModel
 from common.app_factory import create_service_app
 from common.db import get_conn
 
+def get_next_prod_num(conn):
+    row = conn.execute("SELECT MAX(CAST(SUBSTRING(prod_no FROM 'PRD-2026-(\\d+)') AS INTEGER)) AS m FROM factory_mod.production_orders").fetchone()
+    return (row["m"] if row and row["m"] else 100) + 1
+
+
 app = create_service_app("Order Management System (OMS) Service")
 
 
@@ -15,19 +20,26 @@ class OmsOrderCreate(BaseModel):
     customer_email: str | None = None
     company_name: str | None = None
     company_gstin: str | None = None
+    billing_address: str | None = None
+    shipping_address: str | None = None
     outlet_code: str = "DEL01"
     delivery_date: date
     assortment: list[dict]
     branding_notes: str = ""
     credit_limit: float = 0.0
     dispatch_drops: list[dict] = []
+    advance_amount: float = 0.0
+    payment_mode: str = "UPI"
+    payment_reference: str = ""
 
 
 class OmsPaymentPayload(BaseModel):
-    stage: str
+    stage: str = "Advance"
     amount: float
     mode: str = "UPI / NEFT"
+    payment_mode: str = ""
     reference: str = "REF-1001"
+    close_order: bool = True
 
 
 class OmsAssortmentUpdate(BaseModel):
@@ -47,6 +59,25 @@ def list_oms_orders():
         return orders
 
 
+@app.get("/orders/calendar")
+def get_orders_calendar():
+    with get_conn() as conn:
+        orders = conn.execute("SELECT * FROM oms_mod.bulk_orders ORDER BY delivery_date ASC, id DESC").fetchall()
+        by_date = {}
+        for o in orders:
+            d_str = str(o["delivery_date"])
+            if d_str not in by_date:
+                by_date[d_str] = []
+            by_date[d_str].append(o)
+
+        high_volume = [d for d, ords in by_date.items() if len(ords) >= 3]
+        return {
+            "total_orders": len(orders),
+            "orders_by_date": by_date,
+            "high_volume_dates": high_volume,
+        }
+
+
 @app.post("/orders")
 def create_oms_order(payload: OmsOrderCreate):
     with get_conn() as conn:
@@ -55,51 +86,175 @@ def create_oms_order(payload: OmsOrderCreate):
         enriched = []
         for line in payload.assortment:
             item = conn.execute(
-                "SELECT name, cost_price, selling_price, inventory_uom FROM admin_mod.items WHERE sku = %s",
-                (line["sku"],),
+                "SELECT name, cost_price, selling_price, inventory_uom, sub_category FROM admin_mod.items WHERE sku = %s",
+                (line.get("sku"),),
             ).fetchone()
             
-            item_name = line.get("name") or (item["name"] if item else line["sku"])
-            cost_p = float(item["cost_price"]) if item else float(line.get("unit_rate", 500)) * 0.52
-            sell_p = float(line.get("unit_rate", item["selling_price"] if item else 650))
-            uom = item["inventory_uom"] if item else line.get("uom", "kg")
+            item_name = line.get("name") or (item["name"] if item else line.get("sku", "Special Sweets Assortment"))
+            cost_p = float(line.get("cost_price") or (item["cost_price"] if item else float(line.get("unit_rate", 500)) * 0.52))
+            sell_p = float(line.get("unit_rate") or (item["selling_price"] if item else 650))
+            uom = line.get("uom") or (item["inventory_uom"] if item else "kg")
+            category = item["sub_category"] if item else line.get("category", "Ghee Sweets")
 
-            boxes = int(line.get("boxes", 10))
-            qty_per_box = float(line.get("qty_per_box", 0.5))
-            total_qty = round(boxes * qty_per_box, 2)
+            boxes = int(line.get("boxes", 1))
+            qty_per_box = float(line.get("qty_per_box", 1.0))
+            total_qty = round(float(line.get("total_qty") or (boxes * qty_per_box)), 2)
             unit_rate = sell_p
-            bom_cost_total += total_qty * cost_p
-            selling_total += total_qty * unit_rate
+            line_cost = round(total_qty * cost_p, 2)
+            line_total = round(total_qty * unit_rate, 2)
+
+            bom_cost_total += line_cost
+            selling_total += line_total
+
             enriched.append({
-                "sku": line["sku"],
+                "sku": line.get("sku", "FG-CUSTOM"),
                 "name": item_name,
+                "category": category,
                 "qty_per_box": qty_per_box,
                 "uom": uom,
                 "boxes": boxes,
                 "total_qty": total_qty,
+                "cost_price": cost_p,
                 "unit_rate": unit_rate,
+                "line_cost": line_cost,
+                "line_total": line_total,
             })
         
+        selling_total = round(selling_total, 2)
+        bom_cost_total = round(bom_cost_total, 2)
         margin_pct = round(((selling_total - bom_cost_total) / max(selling_total, 1)) * 100.0, 2)
-        cnt = conn.execute("SELECT COUNT(*) AS c FROM oms_mod.bulk_orders").fetchone()["c"] + 11
-        order_no = f"OMS-2026-{cnt:04d}"
-        return conn.execute(
+
+        # 1. Fetch next auto-incremented order number from master_code_sequences
+        seq_row = conn.execute(
+            "SELECT * FROM admin_mod.master_code_sequences WHERE LOWER(entity_type) = 'order' FOR UPDATE"
+        ).fetchone()
+        if seq_row:
+            curr = seq_row["current_number"]
+            pad = seq_row["padding_length"]
+            prefix = seq_row["prefix"]
+            order_no = f"{prefix}{curr:0{pad}d}"
+            conn.execute(
+                "UPDATE admin_mod.master_code_sequences SET current_number = current_number + 1 WHERE id = %s",
+                (seq_row["id"],),
+            )
+        else:
+            cnt = conn.execute("SELECT COUNT(*) AS c FROM oms_mod.bulk_orders").fetchone()["c"] + 1001
+            order_no = f"ORD-{cnt:04d}"
+
+        # 2. Status & Advance Handling
+        advance = round(float(payload.advance_amount or 0), 2)
+        if advance > 0:
+            order_status = "CONFIRMED"
+            advance_paid = min(advance, selling_total)
+            balance_due = round(max(selling_total - advance_paid, 0.0), 2)
+        else:
+            order_status = "QUOTATION"
+            advance_paid = 0.0
+            balance_due = selling_total
+
+        # 3. Insert Bulk Order Record
+        order_row = conn.execute(
             """
             INSERT INTO oms_mod.bulk_orders
-            (order_no, order_type, customer_name, customer_mobile, customer_email, company_name, company_gstin, outlet_code, delivery_date,
+            (order_no, order_type, customer_name, customer_mobile, customer_email, company_name, company_gstin,
+             billing_address, shipping_address, outlet_code, delivery_date,
              status, assortment, branding_notes, bom_cost_total, selling_total, margin_pct, advance_paid, balance_due, credit_limit, dispatch_drops)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'QUOTATION',%s::jsonb,%s,%s,%s,%s,0,%s,%s,%s::jsonb)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
             RETURNING *
             """,
             (
                 order_no, payload.order_type, payload.customer_name, payload.customer_mobile,
                 payload.customer_email, payload.company_name, payload.company_gstin,
-                payload.outlet_code, payload.delivery_date, json.dumps(enriched),
-                payload.branding_notes, round(bom_cost_total, 2), round(selling_total, 2),
-                margin_pct, round(selling_total, 2), payload.credit_limit,
+                payload.billing_address, payload.shipping_address,
+                payload.outlet_code, payload.delivery_date, order_status, json.dumps(enriched),
+                payload.branding_notes, bom_cost_total, selling_total,
+                margin_pct, advance_paid, balance_due, payload.credit_limit,
                 json.dumps(payload.dispatch_drops),
             ),
         ).fetchone()
+
+        order_id = order_row["id"]
+
+        # 4. If Advance Received: Record Payment & Auto-Trigger Factory Production Workflow
+        rcpt_no = None
+        created_prods = []
+        if advance > 0:
+            rcpt_no = f"RCPT-ADV-{int(datetime.now().timestamp()) % 100000}"
+            ref_str = payload.payment_reference or f"AUTO-{payload.payment_mode}"
+            conn.execute(
+                """
+                INSERT INTO oms_mod.oms_payments (order_no, receipt_no, stage, amount, mode, reference)
+                VALUES (%s, %s, 'ADVANCE', %s, %s, %s)
+                """,
+                (order_no, rcpt_no, advance_paid, payload.payment_mode, ref_str),
+            )
+
+            # Auto-kickoff Factory Production Workflow
+            cnt_prod = get_next_prod_num(conn)
+            for idx, line in enumerate(enriched):
+                prod_no = f"PRD-2026-{cnt_prod + idx:03d}"
+                qty = float(line["total_qty"])
+                exp_cost = round(qty * float(line.get("cost_price", 300)), 2)
+                conn.execute(
+                    """
+                    INSERT INTO factory_mod.production_orders
+                    (prod_no, fg_sku, fg_name, sweet_line, planned_qty, uom, source_type, source_ref, kettle_line, shift, status, expected_rm_cost, labor_overhead)
+                    VALUES (%s,%s,%s,%s,%s,%s,'OMS Bulk',%s,'Copper Karahi #1','Morning Shift','Planned',%s,%s)
+                    """,
+                    (
+                        prod_no, line["sku"], line["name"], line.get("category", "Ghee Sweets"),
+                        qty, line["uom"], order_no, exp_cost, round(qty * 25.0, 2),
+                    ),
+                )
+                created_prods.append(prod_no)
+
+            primary_prod = created_prods[0] if created_prods else f"PRD-{order_no}"
+            conn.execute(
+                "UPDATE oms_mod.bulk_orders SET production_req_no = %s, status = 'PRODUCTION_LOCKED' WHERE id = %s",
+                (primary_prod, order_id),
+            )
+            order_row["production_req_no"] = primary_prod
+            order_row["status"] = "PRODUCTION_LOCKED"
+
+        # 5. Format WhatsApp & SMS Dispatches
+        clean_mob = (payload.customer_mobile or "").replace("-", "").replace(" ", "").replace("+", "")
+        if not clean_mob.startswith("91") and len(clean_mob) == 10:
+            clean_mob = f"91{clean_mob}"
+
+        items_str = ", ".join([f"{i['total_qty']}{i['uom']} {i['name']}" for i in enriched[:3]])
+        if len(enriched) > 3:
+            items_str += f" + {len(enriched) - 3} more"
+
+        wa_text = (
+            f"Namaste {payload.customer_name},\n\n"
+            f"Greetings from Bikanervala Foods Pvt. Ltd.!\n"
+            f"Your order *{order_no}* for *{payload.order_type}* has been successfully registered.\n\n"
+            f"📦 Items: {items_str}\n"
+            f"💰 Total Quote: ₹{selling_total:,.2f}\n"
+            f"💵 Advance Received: ₹{advance_paid:,.2f} ({payload.payment_mode})\n"
+            f"⚖️ Balance Due: ₹{balance_due:,.2f}\n"
+            f"🚚 Scheduled Delivery: {payload.delivery_date}\n\n"
+            f"Track your order live: https://annavya.bikanervala.com/track/{order_no}\n"
+            f"Thank you for choosing tradition and quality!"
+        )
+        import urllib.parse
+        encoded_wa = urllib.parse.quote(wa_text)
+        wa_link = f"https://wa.me/{clean_mob}?text={encoded_wa}"
+
+        return {
+            "success": True,
+            "order": order_row,
+            "order_no": order_no,
+            "advance_paid": advance_paid,
+            "balance_due": balance_due,
+            "status": order_row["status"],
+            "receipt_no": rcpt_no,
+            "production_triggered": len(created_prods) > 0,
+            "production_orders": created_prods,
+            "whatsapp_link": wa_link,
+            "whatsapp_message": wa_text,
+            "sms_dispatch": f"Order {order_no} confirmed at Bikanervala. Total ₹{selling_total:,.2f}. Advance ₹{advance_paid:,.2f}. Delivery: {payload.delivery_date}.",
+        }
 
 
 @app.post("/orders/{order_id}/send-whatsapp-quote")
@@ -213,25 +368,79 @@ def record_payment(order_id: int, payload: OmsPaymentPayload):
         if not order:
             raise HTTPException(status_code=404, detail="OMS order not found")
         rcpt = f"RCPT-OMS-{int(datetime.now().timestamp()) % 100000}"
+        effective_mode = payload.payment_mode or payload.mode
         conn.execute(
             """
             INSERT INTO oms_mod.oms_payments (order_no, receipt_no, stage, amount, mode, reference)
             VALUES (%s,%s,%s,%s,%s,%s)
             """,
-            (order["order_no"], rcpt, payload.stage, payload.amount, payload.mode, payload.reference),
+            (order["order_no"], rcpt, payload.stage, payload.amount, effective_mode, payload.reference),
         )
         new_adv = round(float(order["advance_paid"]) + payload.amount, 2)
         new_bal = round(max(0.0, float(order["selling_total"]) - new_adv), 2)
         new_status = order["status"]
+        prod_triggered = False
         if order["status"] in ("ENQUIRY", "QUOTATION") and new_adv > 0:
             new_status = "CONFIRMED"
+            # Auto-kickoff production if not already started
+            if not order["production_req_no"]:
+                created_prods = []
+                cnt = get_next_prod_num(conn)
+                for idx, line in enumerate(order["assortment"]):
+                    item = conn.execute("SELECT sub_category, inventory_uom, cost_price FROM admin_mod.items WHERE sku = %s", (line.get("sku"),)).fetchone()
+                    prod_no = f"PRD-2026-{cnt + idx:03d}"
+                    qty = float(line.get("total_qty") or (int(line.get("boxes", 1)) * float(line.get("qty_per_box", 0.5))))
+                    exp_cost = round(qty * float(item["cost_price"] if item else 300), 2)
+                    conn.execute(
+                        """
+                        INSERT INTO factory_mod.production_orders
+                        (prod_no, fg_sku, fg_name, sweet_line, planned_qty, uom, source_type, source_ref, kettle_line, shift, status, expected_rm_cost, labor_overhead)
+                        VALUES (%s,%s,%s,%s,%s,%s,'OMS Bulk',%s,'Copper Karahi #1','Morning Shift','Planned',%s,%s)
+                        """,
+                        (
+                            prod_no, line["sku"], line["name"], item["sub_category"] if item else "Ghee Sweets",
+                            qty, line.get("uom", "kg"), order["order_no"], exp_cost, round(qty * 25.0, 2),
+                        ),
+                    )
+                    created_prods.append(prod_no)
+                if created_prods:
+                    conn.execute(
+                        "UPDATE oms_mod.bulk_orders SET production_req_no = %s WHERE id = %s",
+                        (created_prods[0], order_id),
+                    )
+                    new_status = "PRODUCTION_LOCKED"
+                    prod_triggered = True
+
+        elif (new_bal <= 0 or payload.stage == "BALANCE_SETTLEMENT") and (payload.close_order or order["status"] in ("FOOD_READY", "READY_FOR_DELIVERY", "DISPATCHED", "QC_READY", "CONFIRMED")):
+            new_status = "COMPLETED"
         elif new_bal == 0 and order["status"] in ("DISPATCHED", "QC_READY"):
             new_status = "SETTLED"
         updated = conn.execute(
             "UPDATE oms_mod.bulk_orders SET advance_paid = %s, balance_due = %s, status = %s WHERE id = %s RETURNING *",
             (new_adv, new_bal, new_status, order_id),
         ).fetchone()
-        return {"order": updated, "receipt_no": rcpt}
+
+        whatsapp_receipt_msg = (
+            f"🌟 *Bikanervala Final Payment Receipt*\n"
+            f"Dear {order['customer_name']},\n"
+            f"We have successfully received the balance payment of ₹{payload.amount:,.2f} via {effective_mode} (Ref: {payload.reference}).\n"
+            f"Your order *{order['order_no']}* has been fully settled and closed!\n"
+            f"Total Paid: ₹{new_adv:,.2f} | Balance: ₹0.00.\n"
+            f"Thank you for choosing Bikanervala!\n"
+            f"📞 Support: +91-11-47000000 | GSTIN: 07AAACB1234F1Z5"
+        )
+
+        return {
+            "order": updated,
+            "status": updated["status"] if updated else new_status,
+            "advance_paid": updated["advance_paid"] if updated else new_adv,
+            "balance_due": updated["balance_due"] if updated else new_bal,
+            "receipt_no": rcpt,
+            "production_triggered": prod_triggered,
+            "production_orders_created": created_prods if "created_prods" in locals() else [],
+            "whatsapp_receipt_msg": whatsapp_receipt_msg,
+            "message": f"Balance payment of ₹{payload.amount:,.2f} recorded successfully. Order {order['order_no']} is now COMPLETED & CLOSED!"
+        }
 
 
 @app.post("/orders/{order_id}/trigger-production")
@@ -433,6 +642,30 @@ KITCHEN_KEYWORDS = [
 ]
 
 
+def classify_kitchen_station(item_name: str, category: str = "") -> str:
+    n = (item_name or "").lower()
+    c = (category or "").lower()
+    if any(k in n for k in ["chaat", "tikki", "bhalla", "golgappa", "samosa", "kachori", "papdi"]):
+        return "Chaat & Snacks"
+    if any(k in n for k in ["tandoor", "naan", "roti", "kulcha", "paratha", "paneer tikka"]):
+        return "Tandoor & Breads"
+    if any(k in n for k in ["dosa", "idli", "vada", "uttapam", "sambhar"]):
+        return "South Indian"
+    if any(k in n for k in ["thali", "combo", "platter"]):
+        return "Thali & Combo"
+    if any(k in n for k in ["dal", "paneer", "chole", "sabzi", "curry", "rice", "biryani", "pulao", "kofta", "korma"]):
+        return "North Indian Main"
+    if any(k in n for k in ["noodle", "manchurian", "chinese", "burger", "pizza", "sandwich", "fried rice", "spring roll", "pasta"]):
+        return "Continental & Fast Food"
+    if any(k in n for k in ["lassi", "tea", "coffee", "shake", "juice", "beverage", "soda", "drink", "chaas"]):
+        return "Beverages & Lassi"
+    if any(k in n for k in ["halwa", "jamun", "kulfi", "rasgulla", "jalebi", "ice cream", "sweet", "dessert"]) or "sweet" in c:
+        return "Mithai & Desserts"
+    if any(k in n for k in ["bread", "toast", "cookie", "cake", "bakery", "rusk"]) or "bakery" in c:
+        return "Pantry & Bakery"
+    return "North Indian Main"
+
+
 def classify_aggregator_item(item: dict) -> str:
     name_lower = str(item.get("name", "")).lower()
     cat = str(item.get("category", "")).lower()
@@ -491,13 +724,30 @@ def accept_aggregator_order(order_id: int, payload: AggregatorAcceptPayload):
         # 3. Route to Restaurant KOT & Kitchen Station (if kitchen food items exist)
         if kitchen_items:
             kot_no = f"KOT-{order['platform'][:3]}-{clean_num}"
-            kot_total = sum(float(i.get("price", 0)) * float(i.get("qty", 1)) for i in kitchen_items)
+            # Enrich items with station and initial status for KDS display
+            enriched_kitchen = []
+            for itm in kitchen_items:
+                q = float(itm.get("qty") or itm.get("quantity") or 1)
+                p = float(itm.get("price") or itm.get("unit_price") or 150)
+                st = itm.get("station") or classify_kitchen_station(itm.get("name", ""), itm.get("category", ""))
+                enriched_kitchen.append({
+                    "sku": itm.get("sku", f"ITEM-{clean_num}"),
+                    "name": itm.get("name", "Restaurant Dish"),
+                    "qty": q,
+                    "unit_price": p,
+                    "price": p,
+                    "station": st,
+                    "station_status": "Queued",
+                    "modifiers": itm.get("instructions") or itm.get("modifiers") or "Online Delivery Order",
+                    "course": "Main",
+                })
+            kot_total = sum(i["unit_price"] * i["qty"] for i in enriched_kitchen)
             kot_row = conn.execute(
                 """
                 INSERT INTO kot_mod.kots
                 (kot_no, outlet_code, table_code, order_source, captain_name, items, status, total_amount, void_reason)
-                VALUES (%s, %s, %s, %s, %s, %s::jsonb, 'FIRED', %s, %s)
-                ON CONFLICT (kot_no) DO UPDATE SET items = EXCLUDED.items, total_amount = EXCLUDED.total_amount
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, 'ACTIVE', %s, %s)
+                ON CONFLICT (kot_no) DO UPDATE SET items = EXCLUDED.items, status = 'ACTIVE', total_amount = EXCLUDED.total_amount
                 RETURNING *
                 """,
                 (
@@ -506,15 +756,15 @@ def accept_aggregator_order(order_id: int, payload: AggregatorAcceptPayload):
                     f"{order['platform']} Delivery Station",
                     order["platform"],
                     f"{order['platform']} OMS Dispatch",
-                    json.dumps(kitchen_items),
+                    json.dumps(enriched_kitchen),
                     kot_total,
                     f"Rider: {order['rider_name']} ({order['rider_mobile']}) | OTP: {order['otp_code']}",
                 ),
             ).fetchone()
             kot_slip = {
                 "kot_no": kot_no,
-                "items": kitchen_items,
-                "item_count": len(kitchen_items),
+                "items": enriched_kitchen,
+                "item_count": len(enriched_kitchen),
                 "total_amount": kot_total,
                 "printing_standard": "Dual-Cut Kitchen Slip (80mm StarPRNT - 1 Copy Kitchen Captain, 1 Copy Counter Chef)",
             }

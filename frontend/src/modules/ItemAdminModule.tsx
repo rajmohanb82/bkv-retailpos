@@ -24,17 +24,32 @@ import {
   FileSpreadsheet,
   FileUp,
   Hash,
+  ImageIcon,
+  Camera,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, PromoOffer } from "../types";
+import { ItemImageUploadModal } from "../components/ItemImageUploadModal";
+import { getActualDishImage, BIKANERVALA_LOGO_FALLBACK } from "../utils/dishImageResolver";
 
-export const ItemAdminModule: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"items" | "rates" | "promos" | "packages">("items");
+interface ItemAdminModuleProps {
+  initialTab?: "items" | "rates" | "promos" | "packages";
+}
+
+export const ItemAdminModule: React.FC<ItemAdminModuleProps> = ({ initialTab = "items" }) => {
+  const [activeTab, setActiveTab] = useState<"items" | "rates" | "promos" | "packages">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
   const [items, setItems] = useState<ItemSku[]>([]);
   const [promos, setPromos] = useState<PromoOffer[]>([]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // Image Upload Modal state
+  const [selectedItemForImage, setSelectedItemForImage] = useState<ItemSku | null>(null);
 
   // Bulk Upload state
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -590,6 +605,7 @@ export const ItemAdminModule: React.FC = () => {
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800/60 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 font-bold uppercase tracking-wider">
                   <tr>
+                    <th className="py-3 px-4 text-center">Photo</th>
                     <th className="py-3 px-4">SKU / Code</th>
                     <th className="py-3 px-4">Item Name</th>
                     <th className="py-3 px-4">Type</th>
@@ -599,57 +615,84 @@ export const ItemAdminModule: React.FC = () => {
                     <th className="py-3 px-4 text-right">Selling Price</th>
                     <th className="py-3 px-4 text-center">GST %</th>
                     <th className="py-3 px-4 text-center">POS UOM</th>
-                    <th className="py-3 px-4 text-center">Status</th>
+                    <th className="py-3 px-4 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredItems.slice(0, 100).map((it) => (
-                    <tr key={it.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-4 font-mono font-bold text-[#081F5C] dark:text-sky-400">
-                        {it.sku}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
-                        {it.name}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2.5 py-1 rounded-xl text-[10px] font-bold ${
-                            it.item_type === "Packed Food"
-                              ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
-                              : it.is_custom_package || it.item_type === "Custom Package"
-                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                          }`}
-                        >
-                          {it.item_type || (it.category === "FG-Rest" ? "Prepared Food" : "Retail")}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                        {it.sub_category}
-                      </td>
-                      <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
-                        {it.kitchen_station || "Sweet Counter"}
-                      </td>
-                      <td className="py-3 px-4 text-right font-medium text-slate-500">
-                        {formatINR(it.cost_price || 0)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-slate-100">
-                        {formatINR(it.selling_price || 0)}
-                      </td>
-                      <td className="py-3 px-4 text-center font-bold text-slate-700 dark:text-slate-300">
-                        {it.gst_pct}%
-                      </td>
-                      <td className="py-3 px-4 text-center text-slate-500 font-mono">
-                        {it.pos_uom}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Active
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredItems.slice(0, 100).map((it) => {
+                    const { url, isBrandFallback } = getActualDishImage(it);
+                    return (
+                      <tr key={it.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
+                        <td className="py-2 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedItemForImage(it)}
+                            className="group/img relative inline-flex items-center justify-center p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#FAF8F5] dark:bg-slate-800 hover:border-amber-400 hover:shadow-md transition"
+                            title="Click to upload or adjust photo from your system"
+                          >
+                            <div className="w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center">
+                              <img
+                                src={url}
+                                alt={it.name}
+                                className={isBrandFallback ? "h-6 w-auto object-contain" : "w-full h-full object-cover"}
+                              />
+                            </div>
+                            <span className="absolute inset-0 bg-black/60 rounded-xl opacity-0 group-hover/img:opacity-100 flex items-center justify-center text-white text-[9px] font-bold transition-opacity">
+                              <Camera className="w-3.5 h-3.5" />
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-3 px-4 font-mono font-bold text-[#081F5C] dark:text-sky-400">
+                          {it.sku}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-100">
+                          {it.name}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`px-2.5 py-1 rounded-xl text-[10px] font-bold ${
+                              it.item_type === "Packed Food"
+                                ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+                                : it.is_custom_package || it.item_type === "Custom Package"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                                : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                            }`}
+                          >
+                            {it.item_type || (it.category === "FG-Rest" ? "Prepared Food" : "Retail")}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                          {it.sub_category}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 dark:text-slate-400">
+                          {it.kitchen_station || "Sweet Counter"}
+                        </td>
+                        <td className="py-3 px-4 text-right font-medium text-slate-500">
+                          {formatINR(it.cost_price || 0)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-bold text-slate-900 dark:text-slate-100">
+                          {formatINR(it.selling_price || 0)}
+                        </td>
+                        <td className="py-3 px-4 text-center font-bold text-slate-700 dark:text-slate-300">
+                          {it.gst_pct}%
+                        </td>
+                        <td className="py-3 px-4 text-center text-slate-500 font-mono">
+                          {it.pos_uom}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedItemForImage(it)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 font-bold text-[10px] border border-amber-200 dark:border-amber-800 shadow-sm transition"
+                            title="Upload image from computer and auto-adjust to tile"
+                          >
+                            <Camera className="w-3 h-3 text-amber-600" />
+                            <span>Photo</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1806,6 +1849,18 @@ export const ItemAdminModule: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Admin Image Uploader & Auto-Tile Adjuster Modal */}
+      {selectedItemForImage && (
+        <ItemImageUploadModal
+          item={selectedItemForImage}
+          onClose={() => setSelectedItemForImage(null)}
+          onUpdated={(updated) => {
+            setItems((prev) => prev.map((x) => (x.sku === updated.sku ? updated : x)));
+            notify(true, `Dish image for ${updated.name} updated!`);
+          }}
+        />
       )}
     </div>
   );

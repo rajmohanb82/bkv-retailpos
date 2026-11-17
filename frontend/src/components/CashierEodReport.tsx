@@ -52,17 +52,36 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
   actorName = "Cashier",
 }) => {
   const [scope, setScope] = useState<"today" | "all">("today");
+  const [selectedCashier, setSelectedCashier] = useState<string>(actorName || "Priya Sharma");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [ledgerFilter, setLedgerFilter] = useState<string>("ALL");
+  const [openingFloat, setOpeningFloat] = useState<number>(5000);
+  const [denominations, setDenominations] = useState<{ [denom: string]: number }>({
+    "500": 0,
+    "200": 0,
+    "100": 0,
+    "50": 0,
+    "20": 0,
+    "10": 0,
+    coins: 0,
+  });
+  const [reconcileSuccess, setReconcileSuccess] = useState(false);
 
   const loadEod = async () => {
     setLoading(true);
     try {
+      const cashierParam = selectedCashier ? `&cashier_id=${encodeURIComponent(selectedCashier)}` : "";
       const res = await apiFetch<any>(
-        `/api/pos/reports/eod?outlet_code=${encodeURIComponent(outletCode)}&scope=${scope}`
+        `/api/pos/reports/eod?outlet_code=${encodeURIComponent(outletCode)}&scope=${scope}${cashierParam}`
       );
       setData(res);
+      if (res?.drawer_reconciliation) {
+        setOpeningFloat(Number(res.drawer_reconciliation.opening_cash || 5000));
+        if (res.drawer_reconciliation.declared_cash) {
+          // If already declared in shift
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -70,12 +89,51 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
 
   useEffect(() => {
     loadEod();
-  }, [outletCode, scope]);
+  }, [outletCode, scope, selectedCashier]);
 
   const summary = data?.summary || {};
   const tenderBreakdown: any[] = data?.tender_breakdown || [];
   const productBreakdown: any[] = data?.product_breakdown || [];
   const ordersLedger: any[] = data?.orders_ledger || [];
+  const availableCashiers: string[] = data?.available_cashiers || [
+    "Priya Sharma",
+    "Meera Kapoor",
+    "Rajeshwar Agarwal",
+  ];
+
+  const cashSales = Number(summary.cash_total || 0);
+  const physicalCountedCash =
+    (denominations["500"] || 0) * 500 +
+    (denominations["200"] || 0) * 200 +
+    (denominations["100"] || 0) * 100 +
+    (denominations["50"] || 0) * 50 +
+    (denominations["20"] || 0) * 20 +
+    (denominations["10"] || 0) * 10 +
+    (denominations["coins"] || 0);
+
+  const expectedDrawerCash = openingFloat + cashSales;
+  const drawerVariance = physicalCountedCash > 0 ? Number((physicalCountedCash - expectedDrawerCash).toFixed(2)) : 0;
+  const isDrawerMatched = physicalCountedCash > 0 && Math.abs(drawerVariance) < 0.01;
+
+  const handleReconcileDrawer = async () => {
+    try {
+      await apiFetch("/api/pos/reports/eod/declare-drawer", {
+        method: "POST",
+        body: JSON.stringify({
+          outlet_code: outletCode,
+          cashier_id: selectedCashier,
+          opening_cash: openingFloat,
+          declared_cash: physicalCountedCash > 0 ? physicalCountedCash : expectedDrawerCash,
+          denominations,
+        }),
+      });
+      setReconcileSuccess(true);
+      loadEod();
+      setTimeout(() => setReconcileSuccess(false), 4500);
+    } catch (e: any) {
+      alert(e.message || "Failed to save drawer reconciliation");
+    }
+  };
 
   const filteredLedger = ordersLedger.filter((o) => {
     if (ledgerFilter === "ALL") return true;
@@ -236,70 +294,125 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Annavya Cashier EoD Report - ${outletCode}</title>
+<title>Cashier EoD & Drawer Reconciliation - ${selectedCashier} - ${outletCode}</title>
 <style>
-  @page { size: A4; margin: 12mm; }
-  body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; font-size: 11px; }
-  .header { display:flex; justify-content:space-between; align-items:center; border-bottom: 3px solid #081F5C; padding-bottom: 10px; margin-bottom: 14px; }
-  .brand { font-size: 20px; font-weight: 800; color: #081F5C; }
-  .kpis { display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
-  .kpi { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; background: #f8fafc; }
-  .kpi .lbl { font-size: 9.5px; color: #475569; text-transform: uppercase; font-weight: 700; }
-  .kpi .val { font-size: 14px; font-weight: 800; color: #081F5C; margin-top: 3px; }
-  .charts { display:grid; grid-template-columns: 1fr 1.2fr; gap: 12px; margin-bottom: 14px; }
-  .card { border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; background: #fff; }
-  .card h3 { margin: 0 0 8px 0; font-size: 12px; color: #081F5C; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10px; }
-  th, td { border: 1px solid #cbd5e1; padding: 5px 6px; text-align: left; }
+  @page { size: A4; margin: 10mm; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #0f172a; margin: 0; font-size: 11px; }
+  .header { display:flex; justify-content:space-between; align-items:center; border-bottom: 3px solid #081F5C; padding-bottom: 10px; margin-bottom: 12px; }
+  .brand { font-size: 16px; font-weight: 800; color: #081F5C; letter-spacing: -0.3px; }
+  .kpis { display:grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 12px; }
+  .kpi { border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px; background: #f8fafc; }
+  .kpi .lbl { font-size: 9px; color: #475569; text-transform: uppercase; font-weight: 700; }
+  .kpi .val { font-size: 13px; font-weight: 800; color: #081F5C; margin-top: 2px; }
+  .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px; background: #fff; margin-bottom: 10px; }
+  .card h3 { margin: 0 0 6px 0; font-size: 11.5px; color: #081F5C; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 9.5px; }
+  th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: left; }
   th { background: #081F5C; color: #fff; font-weight: 700; }
-  .sign { display:grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 24px; text-align:center; font-size: 10.5px; }
+  .sign { display:grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; text-align:center; font-size: 10px; }
   .sign div { border-top: 1px solid #334155; padding-top: 5px; font-weight: 700; }
 </style>
 </head>
 <body>
   <div class="header">
-    <div>
-      <div class="brand">ANNAVYA — CASHIER END-OF-DAY (EoD) &amp; ACCOUNTS REPORT</div>
-      <div>${outlet?.trade_name || outletCode} (${outlet?.city || "Outlet"}) | GSTIN: ${outlet?.gstin || "07AAACA5678A1ZY"}</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="/bikanervala-logo.png" style="height:42px;object-fit:contain;" onerror="this.style.display='none'" />
+      <div style="height:32px;width:1.5px;background:#cbd5e1;"></div>
+      <img src="/annavya-badge-light.png" style="height:38px;object-fit:contain;" />
+      <div>
+        <div class="brand">CASHIER END-OF-DAY (EoD) &amp; DRAWER RECONCILIATION</div>
+        <div style="font-size:10px;color:#475569;">${outlet?.trade_name || outletCode} • ${outlet?.legal_name || "Retail Outlet"} | GSTIN: ${outlet?.gstin || "07AAACA5678A1ZY"}</div>
+      </div>
     </div>
-    <div style="text-align:right;">
-      <div><b>Cashier:</b> ${actorName}</div>
+    <div style="text-align:right;font-size:10px;">
+      <div><b>Cashier:</b> <span style="color:#081F5C;font-size:12px;font-weight:800;">${selectedCashier}</span></div>
+      <div><b>Terminal ID:</b> TERM-${outletCode}-POS1</div>
+      <div><b>Shift:</b> ${data?.drawer_reconciliation?.shift_no || "SHF-01"}</div>
       <div><b>Printed:</b> ${new Date().toLocaleString("en-IN")}</div>
     </div>
   </div>
 
   <div class="kpis">
     <div class="kpi"><div class="lbl">Credit Card</div><div class="val" style="color:#4F46E5;">Rs.${Number(summary.credit_card_total || 0).toFixed(2)}</div></div>
-    <div class="kpi"><div class="lbl">Cash</div><div class="val" style="color:#059669;">Rs.${Number(summary.cash_total || 0).toFixed(2)}</div></div>
+    <div class="kpi"><div class="lbl">Cash Sales</div><div class="val" style="color:#059669;">Rs.${Number(summary.cash_total || 0).toFixed(2)}</div></div>
     <div class="kpi"><div class="lbl">UPI / QR</div><div class="val" style="color:#0284C7;">Rs.${Number(summary.upi_total || 0).toFixed(2)}</div></div>
     <div class="kpi"><div class="lbl">Food Coupon</div><div class="val" style="color:#D97706;">Rs.${Number(summary.food_coupon_total || 0).toFixed(2)}</div></div>
-    <div class="kpi"><div class="lbl">Total Collected</div><div class="val">Rs.${Number(summary.total_collected || 0).toFixed(2)}</div></div>
+    <div class="kpi"><div class="lbl">Gross Sales</div><div class="val" style="color:#081F5C;">Rs.${Number(summary.gross_sales || 0).toFixed(2)}</div></div>
+    <div class="kpi"><div class="lbl">Total Collected</div><div class="val" style="color:#047857;">Rs.${Number(summary.total_collected || 0).toFixed(2)}</div></div>
   </div>
 
-  <div class="charts">
-    <div class="card">
-      <h3>Tender Category Mix (Credit Card / Cash / UPI / Food Coupon)</h3>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <svg width="160" height="160" viewBox="0 0 160 160">
-          <circle r="${radius}" cx="80" cy="80" fill="transparent" stroke="#e2e8f0" stroke-width="26" />
-          ${donutSegments}
-          <text x="80" y="76" text-anchor="middle" font-size="9" fill="#475569">PAID ORDERS</text>
-          <text x="80" y="92" text-anchor="middle" font-size="15" font-weight="800" fill="#081F5C">${summary.paid_orders || 0}</text>
-        </svg>
-        <div style="flex:1;">${tenderBarsHtml}</div>
+  <!-- Cash Drawer Balance & Reconciliation Statement -->
+  <div class="card" style="border: 2px solid ${isDrawerMatched ? '#059669' : '#d97706'}; background:${isDrawerMatched ? '#f0fdf4' : '#fffbeb'};">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid ${isDrawerMatched ? '#86efac' : '#fde68a'};padding-bottom:5px;margin-bottom:6px;">
+      <h3 style="margin:0;color:${isDrawerMatched ? '#065f46' : '#92400e'};font-size:11.5px;">
+        💵 CASH DRAWER BALANCE &amp; PHYSICAL CASH RECONCILIATION
+      </h3>
+      <span style="font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;background:${isDrawerMatched ? '#059669' : '#d97706'};color:#fff;">
+        ${isDrawerMatched ? 'DRAWER BALANCED & MATCHED (Rs.0.00 Variance)' : drawerVariance !== 0 ? 'DRAWER VARIANCE: Rs.' + drawerVariance.toFixed(2) : 'DRAWER COUNT BALANCED'}
+      </span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:8px;font-size:10px;">
+      <div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;">1. OPENING FLOAT</div>
+        <div style="font-size:13px;font-weight:800;color:#0f172a;margin-top:2px;">Rs.${openingFloat.toFixed(2)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;">2. CASH SALES (SYSTEM)</div>
+        <div style="font-size:13px;font-weight:800;color:#059669;margin-top:2px;">Rs.${cashSales.toFixed(2)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;">3. EXPECTED CASH IN DRAWER</div>
+        <div style="font-size:13px;font-weight:800;color:#081F5C;margin-top:2px;">Rs.${expectedDrawerCash.toFixed(2)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;">4. PHYSICAL CASH COUNTED</div>
+        <div style="font-size:13px;font-weight:800;color:${isDrawerMatched ? '#059669' : '#b45309'};margin-top:2px;">Rs.${(physicalCountedCash > 0 ? physicalCountedCash : expectedDrawerCash).toFixed(2)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:#64748b;font-weight:700;">5. DRAWER VARIANCE</div>
+        <div style="font-size:13px;font-weight:800;color:${isDrawerMatched ? '#059669' : '#dc2626'};margin-top:2px;">Rs.${drawerVariance.toFixed(2)}</div>
       </div>
     </div>
-
-    <div class="card">
-      <h3>Top Products Sold (Revenue &amp; Quantity)</h3>
-      <svg width="100%" height="${Math.max(120, productBreakdown.slice(0, 8).length * 28 + 16)}" viewBox="0 0 500 ${Math.max(120, productBreakdown.slice(0, 8).length * 28 + 16)}">
-        ${prodBarsSvg}
-      </svg>
-    </div>
+    ${physicalCountedCash > 0 ? `
+    <div style="margin-top:6px;padding-top:5px;border-top:1px dashed #cbd5e1;font-size:9.5px;display:flex;gap:10px;flex-wrap:wrap;color:#334155;">
+      <b>Physical Denominations:</b>
+      <span>₹500 × ${denominations['500'] || 0} = ₹${(denominations['500'] || 0)*500}</span>
+      <span>₹200 × ${denominations['200'] || 0} = ₹${(denominations['200'] || 0)*200}</span>
+      <span>₹100 × ${denominations['100'] || 0} = ₹${(denominations['100'] || 0)*100}</span>
+      <span>₹50 × ${denominations['50'] || 0} = ₹${(denominations['50'] || 0)*50}</span>
+      <span>₹20 × ${denominations['20'] || 0} = ₹${(denominations['20'] || 0)*20}</span>
+      <span>₹10 × ${denominations['10'] || 0} = ₹${(denominations['10'] || 0)*10}</span>
+      <span>Coins = ₹${denominations['coins'] || 0}</span>
+    </div>` : ''}
   </div>
 
-  <div class="card" style="margin-bottom:12px;">
-    <h3>Product-Wise Summary (${productBreakdown.length} SKUs)</h3>
+  <div class="card" style="margin-bottom:10px;">
+    <h3>Tender Category Summary</h3>
+    <table>
+      <thead>
+        <tr><th>Tender Mode</th><th style="text-align:right;">Order Count</th><th style="text-align:right;">Collected Amount</th><th style="text-align:right;">Share %</th></tr>
+      </thead>
+      <tbody>
+        ${tenderBreakdown.map((t) => `
+          <tr>
+            <td><b>${t.category}</b></td>
+            <td style="text-align:right;">${t.order_count}</td>
+            <td style="text-align:right;">Rs.${Number(t.amount).toFixed(2)}</td>
+            <td style="text-align:right;">${t.share_pct}%</td>
+          </tr>
+        `).join("")}
+        <tr style="background:#f1f5f9;font-weight:700;">
+          <td>TOTAL COLLECTED</td>
+          <td style="text-align:right;">${summary.paid_orders || 0}</td>
+          <td style="text-align:right;">Rs.${Number(summary.total_collected || 0).toFixed(2)}</td>
+          <td style="text-align:right;">100%</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-bottom:10px;">
+    <h3>Product-Wise Sales Summary (${productBreakdown.length} SKUs)</h3>
     <table>
       <thead>
         <tr><th>SKU</th><th>Product Name</th><th style="text-align:right;">Qty / Wt Sold</th><th style="text-align:right;">Orders</th><th style="text-align:right;">GST %</th><th style="text-align:right;">Gross Amount</th></tr>
@@ -319,7 +432,7 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
   </div>
 
   <div class="sign">
-    <div>Cashier Signature (${actorName})</div>
+    <div>Cashier Signature (${selectedCashier})</div>
     <div>Shop Manager Verification</div>
     <div>Accounts Department Sign-off</div>
   </div>
@@ -363,6 +476,22 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1">
+            <span className="text-xs font-bold text-slate-500">Cashier:</span>
+            <select
+              value={selectedCashier}
+              onChange={(e) => setSelectedCashier(e.target.value)}
+              className="text-xs font-extrabold text-annavya-navy bg-transparent outline-none cursor-pointer"
+            >
+              {availableCashiers.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+              <option value="ALL">All Cashiers</option>
+            </select>
+          </div>
+
           <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-bold">
             <button
               onClick={() => setScope("today")}
@@ -393,15 +522,141 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
-            Tabular CSV (Accounts)
+            Tabular CSV
           </button>
           <button
             onClick={downloadGraphicalPdf}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-annavya-royal hover:bg-annavya-navy text-white text-xs font-bold shadow-sm"
           >
             <FileText className="w-3.5 h-3.5" />
-            Graphical PDF Report
+            Cashier EoD PDF Report
           </button>
+        </div>
+      </div>
+
+      {/* Cash Drawer Balance & Physical Reconciliation Panel */}
+      <div className="bg-white border-2 border-emerald-600/30 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h4 className="text-sm font-extrabold text-annavya-navy flex items-center gap-2">
+              <Banknote className="w-4 h-4 text-emerald-600" />
+              <span>Cash Drawer Balance & Physical Reconciliation ({selectedCashier})</span>
+            </h4>
+            <p className="text-xs text-slate-500">
+              Terminal: TERM-{outletCode}-POS1 • Match drawer balance against cash sales + opening float
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`px-3 py-1 rounded-full text-xs font-extrabold flex items-center gap-1.5 ${
+                isDrawerMatched
+                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  : drawerVariance !== 0
+                  ? "bg-amber-100 text-amber-800 border border-amber-300"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {isDrawerMatched ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>DRAWER BALANCED & MATCHED (₹0.00 Variance)</span>
+                </>
+              ) : drawerVariance !== 0 ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Variance: {formatINR(drawerVariance)} ({drawerVariance > 0 ? "Surplus" : "Shortage"})</span>
+                </>
+              ) : (
+                <span>Count Drawer Cash to Reconcile</span>
+              )}
+            </span>
+            <button
+              onClick={handleReconcileDrawer}
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition"
+            >
+              {reconcileSuccess ? "Saved & Reconciled ✓" : "Save & Reconcile Drawer"}
+            </button>
+          </div>
+        </div>
+
+        {/* 4 Reconciliation Stat Blocks */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block">1. Opening Float</span>
+            <div className="flex items-center gap-1 mt-1">
+              <span className="font-bold text-slate-400">₹</span>
+              <input
+                type="number"
+                value={openingFloat}
+                onChange={(e) => setOpeningFloat(Number(e.target.value) || 0)}
+                className="w-24 font-extrabold text-sm text-slate-800 bg-white border border-slate-200 rounded px-1.5 py-0.5 outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block">2. Cash Sales (System)</span>
+            <span className="font-extrabold text-sm text-emerald-700 block mt-1">
+              {formatINR(cashSales)}
+            </span>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block">3. Expected in Drawer</span>
+            <span className="font-extrabold text-sm text-annavya-navy block mt-1">
+              {formatINR(expectedDrawerCash)}
+            </span>
+          </div>
+
+          <div className={`p-3 rounded-xl border ${isDrawerMatched ? "bg-emerald-50/60 border-emerald-200" : "bg-amber-50/60 border-amber-200"}`}>
+            <span className="text-[10px] uppercase font-bold text-slate-500 block">4. Counted in Drawer</span>
+            <span className={`font-extrabold text-sm block mt-1 ${isDrawerMatched ? "text-emerald-700" : "text-amber-800"}`}>
+              {formatINR(physicalCountedCash > 0 ? physicalCountedCash : expectedDrawerCash)}
+            </span>
+          </div>
+        </div>
+
+        {/* Cash Denomination Counter Grid */}
+        <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-2">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+            <span>Cash Denomination Counter (Count notes in physical drawer):</span>
+            <span className="text-emerald-700 font-extrabold font-mono">
+              Total Counted: {formatINR(physicalCountedCash)}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+            {[
+              { val: "500", mult: 500 },
+              { val: "200", mult: 200 },
+              { val: "100", mult: 100 },
+              { val: "50", mult: 50 },
+              { val: "20", mult: 20 },
+              { val: "10", mult: 10 },
+              { val: "coins", mult: 1, label: "Coins" },
+            ].map((d) => (
+              <div key={d.val} className="p-2 rounded-lg bg-white border border-slate-200 text-center">
+                <span className="text-[10px] font-bold text-slate-500 block">
+                  {d.label || `₹${d.val}`}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  value={denominations[d.val] || ""}
+                  onChange={(e) =>
+                    setDenominations((prev) => ({
+                      ...prev,
+                      [d.val]: Math.max(0, parseInt(e.target.value) || 0),
+                    }))
+                  }
+                  placeholder="0"
+                  className="w-full text-center font-mono font-bold text-xs py-1 px-1 border border-slate-200 rounded mt-1 outline-none"
+                />
+                <span className="text-[9px] text-slate-400 block mt-0.5">
+                  = ₹{((denominations[d.val] || 0) * d.mult).toLocaleString("en-IN")}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

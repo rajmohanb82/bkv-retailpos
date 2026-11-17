@@ -22,12 +22,23 @@ import {
   Layers,
   Scale,
   X,
+  CheckSquare,
+  Square,
+  RefreshCw,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { VendorDocument, VendorLetterheadPO, VendorPortalDashboard } from "../types";
 
-export const VendorModule: React.FC = () => {
-  const [tab, setTab] = useState<"portal" | "tenders" | "vendors" | "pos" | "prices">("portal");
+interface VendorModuleProps {
+  initialTab?: "portal" | "tenders" | "vendors" | "pos" | "prices";
+}
+
+export const VendorModule: React.FC<VendorModuleProps> = ({ initialTab = "portal" }) => {
+  const [tab, setTab] = useState<"portal" | "tenders" | "vendors" | "pos" | "prices">(initialTab);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [tenders, setTenders] = useState<any[]>([]);
   const [pos, setPos] = useState<any[]>([]);
@@ -82,6 +93,8 @@ export const VendorModule: React.FC = () => {
   const [lineDecisions, setLineDecisions] = useState<any[]>([]);
   const [managerRemarks, setManagerRemarks] = useState<string>("Approved line items against contracted price master caps");
   const [submittingApproval, setSubmittingApproval] = useState(false);
+  const [selectedPoIds, setSelectedPoIds] = useState<number[]>([]);
+  const [batchPoProcessing, setBatchPoProcessing] = useState(false);
 
   const notify = (ok: boolean, msg: string) => {
     setToast({ ok, msg });
@@ -331,6 +344,45 @@ export const VendorModule: React.FC = () => {
       notify(false, err.message || "Line approval submission failed");
     } finally {
       setSubmittingApproval(false);
+    }
+  };
+
+  const handleBatchApprovePos = async () => {
+    if (selectedPoIds.length === 0) return;
+    setBatchPoProcessing(true);
+    let count = 0;
+    try {
+      for (const id of selectedPoIds) {
+        const po = pos.find((p) => p.id === id);
+        if (!po) continue;
+        const items = po.items || [];
+        try {
+          await apiFetch(`/api/vendor/purchase-orders/${id}/line-approval`, {
+            method: "POST",
+            body: JSON.stringify({
+              manager_name: "Location / Corporate Manager",
+              overall_decision: "APPROVED",
+              manager_remarks: "Batch approved all PO lines by Location Manager",
+              line_decisions: items.map((it: any, idx: number) => ({
+                item_id: idx + 1,
+                approved: true,
+                approved_qty: it.qty,
+                remarks: "Approved in bulk",
+              })),
+            }),
+          });
+          count++;
+        } catch (e) {
+          console.error(`Failed to approve PO ${id}:`, e);
+        }
+      }
+      notify(true, `Batch Approval: Successfully approved ${count} purchase orders!`);
+      setSelectedPoIds([]);
+      load();
+    } catch (err: any) {
+      notify(false, `Batch approval error: ${err.message || err}`);
+    } finally {
+      setBatchPoProcessing(false);
     }
   };
 
@@ -1007,12 +1059,77 @@ export const VendorModule: React.FC = () => {
 
           {/* PO Listing */}
           <div className="lg:col-span-8 space-y-3">
+            {pos.some((p) => p.status !== "APPROVED" && p.status !== "CLOSED") && (
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 rounded-2xl p-3 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pending = pos.filter((p) => p.status !== "APPROVED" && p.status !== "CLOSED");
+                      if (selectedPoIds.length === pending.length) {
+                        setSelectedPoIds([]);
+                      } else {
+                        setSelectedPoIds(pending.map((p) => p.id));
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-amber-200 dark:border-amber-800 text-xs font-bold text-amber-900 dark:text-amber-200 shadow-sm"
+                  >
+                    {selectedPoIds.length ===
+                      pos.filter((p) => p.status !== "APPROVED" && p.status !== "CLOSED").length &&
+                    selectedPoIds.length > 0 ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-amber-600" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                    Select All ({pos.filter((p) => p.status !== "APPROVED" && p.status !== "CLOSED").length})
+                  </button>
+                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                    {selectedPoIds.length} POs selected
+                  </span>
+                </div>
+
+                {selectedPoIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleBatchApprovePos}
+                    disabled={batchPoProcessing}
+                    className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition disabled:opacity-50"
+                  >
+                    {batchPoProcessing ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" />
+                    )}
+                    Approve All Selected POs ({selectedPoIds.length})
+                  </button>
+                )}
+              </div>
+            )}
+
             {pos.map((p) => (
               <div
                 key={p.id}
                 className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex flex-wrap justify-between items-center gap-4 text-xs"
               >
-                <div className="space-y-1">
+                <div className="flex items-start gap-3">
+                  {p.status !== "APPROVED" && p.status !== "CLOSED" && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedPoIds((prev) =>
+                          prev.includes(p.id) ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                        )
+                      }
+                      className="mt-1"
+                    >
+                      {selectedPoIds.includes(p.id) ? (
+                        <CheckSquare className="w-4 h-4 text-amber-600" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-400" />
+                      )}
+                    </button>
+                  )}
+                  <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-mono font-extrabold text-sky-600 text-sm">{p.po_no}</span>
                     <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 font-bold text-[10px]">
@@ -1028,6 +1145,7 @@ export const VendorModule: React.FC = () => {
                   <div className="text-slate-500">
                     Grand Total: <b className="text-emerald-600 font-mono text-sm">{formatINR(p.total_amount)}</b>
                   </div>
+                </div>
                 </div>
 
                 <div className="flex items-center gap-2">

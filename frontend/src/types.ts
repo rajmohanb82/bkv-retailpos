@@ -12,7 +12,8 @@ export type ModuleId =
   | "vendor"
   | "admin"
   | "item_admin"
-  | "reports";
+  | "reports"
+  | "walkie_talkie";
 
 export interface Outlet {
   id: number;
@@ -39,6 +40,8 @@ export interface Outlet {
   floors?: string[];
   kitchen_counters?: string[];
   custom_categories?: string[];
+  cash_counters?: string[];
+  estimate_counters?: string[];
 }
 
 export interface ItemSku {
@@ -61,6 +64,7 @@ export interface ItemSku {
   default_tare_grams: number;
   kitchen_station: string | null;
   active: boolean;
+  image_url?: string | null;
   item_type?: "Prepared Food" | "Packed Food" | "Custom Package" | string;
   is_custom_package?: boolean;
   package_components?: any[];

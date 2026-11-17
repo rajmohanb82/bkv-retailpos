@@ -270,6 +270,12 @@ export async function print40ColumnThermalSlip(
   <div class="line"></div>
   <div class="row"><span>${isPaid ? "INV" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code}</span></div>
   <div class="row"><span>Token Last-4: <b>#${last4}</b></span><span>${new Date().toLocaleTimeString("en-IN")}</span></div>
+  ${
+    order.customer_name || order.customer_mobile
+      ? `<div class="row"><span>Customer:</span><span><b>${order.customer_name || "Walk-in"}</b></span></div>
+         ${order.customer_mobile ? `<div class="row"><span>Mobile:</span><span><b>${order.customer_mobile}</b></span></div>` : ""}`
+      : ""
+  }
   <div style="font-size:10px;">Driver: ${driverName}</div>
   <div class="line"></div>
   <table>

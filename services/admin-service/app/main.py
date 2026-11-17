@@ -68,6 +68,8 @@ class OutletUpdate(BaseModel):
     floors: list[str] | None = None
     kitchen_counters: list[str] | None = None
     custom_categories: list[str] | None = None
+    cash_counters: list[str] | None = None
+    estimate_counters: list[str] | None = None
 
 
 class TableCreate(BaseModel):
@@ -151,6 +153,10 @@ class ItemRateUpdate(BaseModel):
     selling_price: float
     cost_price: float | None = None
     gst_pct: float | None = None
+
+
+class ItemImageUpdate(BaseModel):
+    image_url: str
 
 
 class CustomPackageCreate(BaseModel):
@@ -444,6 +450,12 @@ def update_outlet(outlet_id: int, payload: OutletUpdate):
         if payload.custom_categories is not None:
             updates.append("custom_categories = %s::jsonb")
             params.append(json.dumps(payload.custom_categories))
+        if payload.cash_counters is not None:
+            updates.append("cash_counters = %s::jsonb")
+            params.append(json.dumps(payload.cash_counters))
+        if payload.estimate_counters is not None:
+            updates.append("estimate_counters = %s::jsonb")
+            params.append(json.dumps(payload.estimate_counters))
 
         if updates:
             params.append(outlet_id)
@@ -922,6 +934,22 @@ def update_item_rate(sku: str, payload: ItemRateUpdate):
         return row
 
 
+@app.put("/items/{sku}/image")
+def update_item_image(sku: str, payload: ItemImageUpdate):
+    with get_conn() as conn:
+        row = conn.execute(
+            "UPDATE admin_mod.items SET image_url = %s WHERE UPPER(sku) = %s RETURNING *",
+            (payload.image_url, sku.upper()),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Item {sku} not found")
+        conn.execute(
+            "INSERT INTO admin_mod.audit_logs (module, action, actor, details) VALUES (%s,%s,%s,%s)",
+            ("ITEM_ADMIN", "IMAGE_UPDATED", "Admin User", json.dumps({"sku": sku, "image_preview": payload.image_url[:80]})),
+        )
+        return row
+
+
 @app.post("/items/custom-package")
 def create_custom_package(payload: CustomPackageCreate):
     with get_conn() as conn:
@@ -1393,8 +1421,80 @@ def ensure_rbac_and_hardware_seed():
                 );
                 """
             )
+            # Ensure walkie_talkie_logs table exists
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_mod.walkie_talkie_logs (
+                    id SERIAL PRIMARY KEY,
+                    channel_id INT NOT NULL,
+                    channel_name VARCHAR(100) NOT NULL,
+                    sender_name VARCHAR(100) NOT NULL,
+                    sender_role VARCHAR(100) NOT NULL,
+                    outlet_code VARCHAR(20) NOT NULL,
+                    message_text TEXT NOT NULL,
+                    audio_duration_sec NUMERIC(4,1) DEFAULT 2.5,
+                    is_emergency BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+                """
+            )
+            # Ensure order sequence exists in master_code_sequences
+            conn.execute(
+                """
+                INSERT INTO admin_mod.master_code_sequences (entity_type, prefix, current_number, padding_length, reset_frequency, description)
+                VALUES ('order', 'ORD-', 1001, 4, 'Fiscal Year', 'Bulk Corporate, Wedding & Hamper Orders sequence')
+                ON CONFLICT DO NOTHING;
+                """
+            )
     except Exception as e:
         print("Startup seed sync warning:", e)
+
+
+# =========================================================================
+# SOFTWARE WALKIE-TALKIE / STORE INTERCOM SYSTEM
+# =========================================================================
+
+class WalkieTransmitPayload(BaseModel):
+    channel_id: int = 1
+    channel_name: str = "CH 1: Retail & Sweet Counter"
+    sender_name: str = "Priya Sharma"
+    sender_role: str = "Cashier"
+    outlet_code: str = "DEL01"
+    message_text: str
+    audio_duration_sec: float = 2.5
+    is_emergency: bool = False
+
+
+@app.get("/walkie-talkie/messages")
+def get_walkie_talkie_messages(channel_id: Optional[int] = None, limit: int = 40):
+    with get_conn() as conn:
+        q = "SELECT * FROM admin_mod.walkie_talkie_logs WHERE 1=1"
+        params = []
+        if channel_id is not None:
+            q += " AND channel_id = %s"
+            params.append(channel_id)
+        q += " ORDER BY id DESC LIMIT %s"
+        params.append(limit)
+        return conn.execute(q, tuple(params)).fetchall()
+
+
+@app.post("/walkie-talkie/transmit")
+def transmit_walkie_talkie_message(payload: WalkieTransmitPayload):
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO admin_mod.walkie_talkie_logs
+            (channel_id, channel_name, sender_name, sender_role, outlet_code, message_text, audio_duration_sec, is_emergency)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING *
+            """,
+            (
+                payload.channel_id, payload.channel_name, payload.sender_name,
+                payload.sender_role, payload.outlet_code, payload.message_text,
+                payload.audio_duration_sec, payload.is_emergency,
+            ),
+        ).fetchone()
+        return {"success": True, "transmission": row}
 
 
 # =========================================================================
