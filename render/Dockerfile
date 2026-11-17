@@ -44,9 +44,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY render/requirements.txt /app/render/requirements.txt
 RUN pip install --no-cache-dir -r /app/render/requirements.txt
 
-# Copy microservice backends, shared modules and database schema
+# Copy microservice backends, shared modules, database schema and datasource catalogs
 COPY services/ /app/services/
 COPY db/ /app/db/
+COPY datasource/ /app/datasource/
 
 # Copy compiled frontend from Stage 1
 COPY --from=frontend-builder /app/dist /app/frontend_dist

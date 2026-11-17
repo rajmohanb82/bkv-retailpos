@@ -118,7 +118,54 @@ def apply_schema_migrations(cur):
     except Exception as e:
         print(f"[Render DB Bootstrap] Constraint update warning on bulk_orders: {e}")
 
+    # Ensure 'item_admin', 'order_taking', 'kiosk', 'walkie_talkie' are in role module permissions
+    try:
+        cur.execute("""
+            UPDATE admin_mod.roles
+            SET permissions = jsonb_set(
+                permissions,
+                '{modules}',
+                '["executive","pos","rest_pos","order_taking","kiosk","shop","oms","stores","factory","kot","vendor","admin","item_admin","reports","walkie_talkie"]'::jsonb
+            )
+            WHERE name IN ('Super Admin', 'Director / Owner', 'Corporate Manager', 'Location Manager', 'Shop Manager');
+        """)
+        print("[Render DB Bootstrap] Enabled 'item_admin', 'order_taking', 'kiosk', 'walkie_talkie' in role permissions.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Role permissions update warning: {e}")
+
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
+
+def import_datasource_if_needed(cur):
+    """Imports the 1,657 items from datasource_items.sql if not yet loaded."""
+    cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
+    count = cur.fetchone()[0]
+    print(f"[Render DB Bootstrap] Current items count in database: {count}")
+    if count >= 1000:
+        print(f"[Render DB Bootstrap] Datasource catalog already populated ({count} items present).")
+        return
+
+    candidates = [
+        "/app/render/datasource_items.sql",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasource_items.sql"),
+        os.path.join(os.getcwd(), "render", "datasource_items.sql"),
+        os.path.join(os.getcwd(), "datasource_items.sql"),
+    ]
+    sql_path = None
+    for c in candidates:
+        if os.path.isfile(c):
+            sql_path = c
+            break
+
+    if sql_path:
+        print(f"[Render DB Bootstrap] Importing 1,657 item catalog from {sql_path}...")
+        with open(sql_path, "r", encoding="utf-8") as f:
+            sql = f.read()
+        cur.execute(sql)
+        cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
+        new_count = cur.fetchone()[0]
+        print(f"[Render DB Bootstrap] Datasource imported successfully! Total items: {new_count}")
+    else:
+        print("[Render DB Bootstrap] WARNING: datasource_items.sql not found.")
 
 def bootstrap_database():
     url = get_database_url()
@@ -155,6 +202,9 @@ def bootstrap_database():
 
             # ALWAYS apply migrations so any missing columns are created
             apply_schema_migrations(cur)
+
+            # Auto-populate datasource catalog if needed (< 1000 items)
+            import_datasource_if_needed(cur)
 
             # Verify core counts
             cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
