@@ -63,6 +63,7 @@ The Render edition includes an intelligent database bootstrapper ([render/db_boo
   * **Key**: `DATABASE_URL`
   * **Value**: `postgresql://annavya:annavya_secret@your-db-hostname:5432/annavya_erp`
 * When `DATABASE_URL` is detected, the container skips local postgres, connects to the remote host, checks if `admin_mod.outlets` exists, and automatically executes `db/init.sql` if the tables are fresh.
+* **Automated Idempotent Schema Migrations**: On every boot, [render/db_bootstrap.py](file:///home/rajmohanb/Documents/GitHub-Apps/Bikanervala%20-%20Retail/render/db_bootstrap.py) runs `apply_schema_migrations()`, automatically verifying and adding any missing columns (`failed_attempts`, `is_locked`, `mfa_enabled`, `remittance_breakdown`, etc.) so existing databases are always 100% up to date.
 
 ---
 

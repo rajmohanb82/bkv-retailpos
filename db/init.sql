@@ -54,8 +54,14 @@ CREATE TABLE admin_mod.users (
     mobile VARCHAR(20) NOT NULL,
     email VARCHAR(120) NOT NULL,
     role_id INT REFERENCES admin_mod.roles(id),
+    role_ids JSONB DEFAULT '[]'::jsonb,
     outlet_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
     pin VARCHAR(10) DEFAULT '1234',
+    is_locked BOOLEAN DEFAULT FALSE,
+    failed_attempts INT DEFAULT 0,
+    mfa_enabled BOOLEAN DEFAULT FALSE,
+    mfa_secret VARCHAR(80) DEFAULT NULL,
+    mfa_enrolled_at TIMESTAMPTZ,
     active BOOLEAN DEFAULT TRUE,
     last_active TIMESTAMPTZ DEFAULT NOW()
 );
