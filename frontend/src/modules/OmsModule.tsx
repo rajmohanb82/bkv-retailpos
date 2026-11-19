@@ -458,7 +458,7 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
     }
   };
 
-  // Confirm Balance Payment Settlement (Close Order)
+  // Confirm Balance Payment Settlement (Close Order) & Transform to Tax Invoice
   const handleConfirmBalancePayment = async () => {
     if (!selectedOrderForBalance) return;
     setBalanceLoading(true);
@@ -470,11 +470,32 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
           payment_mode: balancePaymentMode,
           payment_ref: balancePaymentRef || `BAL-${Date.now().toString().slice(-6)}`,
           notes: `Final balance settlement for ${selectedOrderForBalance.order_no} via ${balancePaymentMode}`,
+          stage: "BALANCE_SETTLEMENT",
+          close_order: true,
         }),
       });
 
-      notify(true, res.message || `Balance payment recorded! Order ${selectedOrderForBalance.order_no} is now COMPLETED & CLOSED.`);
+      notify(true, res.message || `Balance payment recorded! Order ${selectedOrderForBalance.order_no} is now COMPLETED & INVOICED.`);
       setShowBalanceModal(false);
+
+      // Auto transform to Tax Invoice & trigger default printer
+      const invNo = res.order?.invoice_no || res.invoice_no || `INV-BULK-${selectedOrderForBalance.outlet_code || "DEL01"}-${(selectedOrderForBalance.order_no || "").replace("OMS-", "").replace("ORD-", "")}`;
+      const updatedOrder = {
+        ...(res.order || selectedOrderForBalance),
+        status: "COMPLETED",
+        balance_due: 0,
+        advance_paid: Number(selectedOrderForBalance.selling_total || 0),
+        invoice_no: invNo,
+        invoiced_at: res.order?.invoiced_at || res.invoiced_at || new Date().toISOString(),
+      };
+      setQuotationOrder(updatedOrder);
+      setShowQuotationModal(true);
+
+      // Immediate auto-print dialog on default printer
+      setTimeout(() => {
+        window.print();
+      }, 400);
+
       loadBulkOrders();
     } catch (err: any) {
       notify(false, err.message || "Error processing balance payment");
@@ -1462,7 +1483,7 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                     <option value="ADVANCE_PAID">Advance Paid</option>
                     <option value="PRODUCTION_LOCKED">In Production</option>
                     <option value="FOOD_READY">Food Ready</option>
-                    <option value="COMPLETED">Completed</option>
+                    <option value="COMPLETED">Completed / Invoiced</option>
                   </select>
 
                   <button
@@ -1483,16 +1504,24 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                       !q ||
                       (o.order_no || "").toLowerCase().includes(q) ||
                       (o.order_no || "").endsWith(q) ||
+                      (o.invoice_no || "").toLowerCase().includes(q) ||
                       (o.customer_name || "").toLowerCase().includes(q) ||
+                      (o.company_name || "").toLowerCase().includes(q) ||
                       (o.customer_mobile || "").includes(q) ||
                       (o.customer_email || "").toLowerCase().includes(q);
-                    const matchesStatus = statusFilterBulk === "ALL" || o.status === statusFilterBulk;
+                    const isSettled = o.status === "COMPLETED" || o.status === "SETTLED" || Number(o.balance_due || 0) <= 0;
+                    const matchesStatus =
+                      statusFilterBulk === "ALL" ||
+                      o.status === statusFilterBulk ||
+                      (statusFilterBulk === "COMPLETED" && isSettled);
                     return matchesSearch && matchesStatus;
                   })
                   .map((o) => {
                     const totalAmount = Number(o.selling_total) || 46500;
                     const advPaid = Number(o.advance_paid) || 0;
                     const balanceDue = Math.max(0, totalAmount - advPaid);
+                    const isSettled = o.status === "COMPLETED" || o.status === "SETTLED" || balanceDue <= 0;
+                    const invoiceNo = o.invoice_no || `INV-BULK-${o.outlet_code || "DEL01"}-${(o.order_no || "").replace("OMS-", "").replace("ORD-", "")}`;
 
                     // 6-step lifecycle workflow
                     const STAGES = [
@@ -1527,19 +1556,25 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                               <span className="font-black text-sm text-[#081F5C] dark:text-sky-300 font-mono">
                                 {o.order_no}
                               </span>
+                              {isSettled && (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-300 font-mono font-bold text-[10px] flex items-center gap-1 border border-emerald-300/60">
+                                  <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                                  <span>{invoiceNo}</span>
+                                </span>
+                              )}
                               <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300 font-bold text-[10px]">
                                 {o.order_type}
                               </span>
                               <span
                                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                  o.status === "COMPLETED"
+                                  isSettled
                                     ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                                     : o.status === "FOOD_READY" || o.status === "READY_FOR_DELIVERY"
                                     ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
                                     : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
                                 }`}
                               >
-                                {o.status}
+                                {isSettled ? "SETTLED / INVOICED" : o.status}
                               </span>
                             </div>
 
@@ -1708,18 +1743,34 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                               </button>
                             )}
 
-                            {/* A4 Tax Invoice / Quotation Preview */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setQuotationOrder(o);
-                                setShowQuotationModal(true);
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-[11px] shadow-xs flex items-center gap-1 transition"
-                            >
-                              <FileText className="w-3.5 h-3.5 text-blue-600" />
-                              <span>A4 Quote</span>
-                            </button>
+                            {/* A4 Tax Invoice / Quotation Button */}
+                            {isSettled ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuotationOrder(o);
+                                  setShowQuotationModal(true);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/50 dark:border-emerald-800 dark:text-emerald-300 font-bold text-[11px] shadow-xs flex items-center gap-1.5 transition"
+                                title="View & Print Official GST Tax Invoice"
+                              >
+                                <FileCheck2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>Tax Invoice</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setQuotationOrder(o);
+                                  setShowQuotationModal(true);
+                                }}
+                                className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-[11px] shadow-xs flex items-center gap-1 transition"
+                                title="View & Print Commercial Quotation"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-blue-600" />
+                                <span>A4 Quote</span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2552,130 +2603,300 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
       )}
 
       {/* ========================================================
-          A4 PRINTABLE QUOTATION PREVIEW MODAL
+          A4 PRINTABLE QUOTATION / TAX INVOICE PREVIEW MODAL
       ======================================================== */}
-      {showQuotationModal && quotationOrder && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
-                <h3 className="font-extrabold text-sm text-[#081F5C] dark:text-white">
-                  A4 Tax Quotation Preview — {quotationOrder.order_no}
-                </h3>
+      {showQuotationModal && quotationOrder && (() => {
+        const isSettled =
+          quotationOrder.status === "COMPLETED" ||
+          quotationOrder.status === "SETTLED" ||
+          Number(quotationOrder.balance_due || 0) <= 0;
+        const invoiceNo =
+          quotationOrder.invoice_no ||
+          `INV-BULK-${quotationOrder.outlet_code || "DEL01"}-${(quotationOrder.order_no || "").replace("OMS-", "").replace("ORD-", "")}`;
+        const invoiceDate = quotationOrder.invoiced_at
+          ? new Date(quotationOrder.invoiced_at).toLocaleDateString("en-IN")
+          : new Date().toLocaleDateString("en-IN");
+        const totalAmt = Number(quotationOrder.selling_total || 46500);
+        const advPaid = Number(quotationOrder.advance_paid || 0);
+        const balDue = isSettled ? 0 : Math.max(0, totalAmt - advPaid);
+        const taxableVal = Math.round((totalAmt / 1.05) * 100) / 100;
+        const totalGst = Math.round((totalAmt - taxableVal) * 100) / 100;
+        const cgst = Math.round((totalGst / 2) * 100) / 100;
+        const sgst = Math.round((totalGst - cgst) * 100) / 100;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  {isSettled ? (
+                    <FileCheck2 className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <FileText className="w-5 h-5 text-blue-600" />
+                  )}
+                  <h3 className="font-extrabold text-sm text-[#081F5C] dark:text-white">
+                    {isSettled
+                      ? `Tax Invoice — ${invoiceNo}`
+                      : `A4 Tax Quotation Preview — ${quotationOrder.order_no}`}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowQuotationModal(false)}
+                  className="p-1 rounded-xl text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowQuotationModal(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-600"
+
+              {/* A4 Document Rendering Container (Printable target) */}
+              <div
+                id="annavya-a4-document"
+                className="p-6 bg-white border border-slate-300 rounded-2xl text-slate-900 space-y-4 shadow-inner"
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+                {/* Header with Logos */}
+                <div className="flex items-center justify-between border-b pb-4">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src="/bikanervala-customer-logo.png"
+                      alt="Bikanervala"
+                      className="h-12 w-auto object-contain"
+                    />
+                    <img
+                      src="/annavya-badge-light.png"
+                      alt="Annavya"
+                      className="h-10 w-auto object-contain"
+                    />
+                  </div>
+                  <div className="text-right text-[11px]">
+                    <div className="font-black text-sm text-[#081F5C]">BIKANERVALA FOODS PVT LTD</div>
+                    <div>GSTIN: 07AAACB1234F1Z5 • FSSAI: 13324001000451</div>
+                    <div className="text-slate-600 font-medium">Connaught Place Flagship, New Delhi - 110001</div>
+                    <div className="text-slate-500 text-[10px]">Ph: +91-11-47000000 • Email: corporate@bikanervala.com</div>
+                  </div>
+                </div>
 
-            {/* A4 Document Rendering Container */}
-            <div className="p-6 bg-white border border-slate-300 rounded-2xl text-slate-900 space-y-4 shadow-inner">
-              {/* Header with Logos */}
-              <div className="flex items-center justify-between border-b pb-4">
-                <div className="flex items-center gap-3">
-                  <img src="/bikanervala-customer-logo.png" alt="Bikanervala" className="h-12 w-auto object-contain" />
-                  <img src="/annavya-badge-light.png" alt="Annavya" className="h-10 w-auto object-contain" />
+                {/* Document Type Badge */}
+                <div
+                  className={`text-center py-1.5 px-3 rounded-lg font-black text-xs tracking-wider uppercase border ${
+                    isSettled
+                      ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                      : "bg-blue-50 text-blue-900 border-blue-200"
+                  }`}
+                >
+                  {isSettled ? "TAX INVOICE (ORIGINAL FOR RECIPIENT)" : "OFFICIAL COMMERCIAL ESTIMATE & QUOTATION"}
                 </div>
-                <div className="text-right text-[11px]">
-                  <div className="font-black text-sm text-[#081F5C]">BIKANERVALA FOODS PVT LTD</div>
-                  <div>GSTIN: 07AAAAA0000A1Z5 • FSSAI: 10012011000123</div>
-                  <div className="text-slate-500">Connaught Place Flagship, New Delhi</div>
-                </div>
-              </div>
 
-              {/* Quotation Metadata */}
-              <div className="grid grid-cols-2 gap-4 text-xs pt-1">
-                <div>
-                  <span className="font-bold text-slate-400 uppercase text-[10px] block">Customer Billed To:</span>
-                  <div className="font-extrabold text-sm text-slate-900">{quotationOrder.customer_name}</div>
-                  <div className="text-slate-600">Mobile: {quotationOrder.customer_mobile}</div>
-                  <div className="text-slate-600">Email: {quotationOrder.customer_email || "N/A"}</div>
-                  {quotationOrder.company_gstin && <div className="font-mono">GSTIN: {quotationOrder.company_gstin}</div>}
-                  <div className="text-slate-500 text-[11px] mt-1">{quotationOrder.billing_address || "Corporate Office"}</div>
+                {/* Metadata Grid */}
+                <div className="grid grid-cols-2 gap-4 text-xs pt-1">
+                  <div>
+                    <span className="font-bold text-slate-400 uppercase text-[10px] block">Customer Billed To:</span>
+                    <div className="font-extrabold text-sm text-slate-900">{quotationOrder.customer_name}</div>
+                    {quotationOrder.company_name && (
+                      <div className="font-bold text-slate-700">{quotationOrder.company_name}</div>
+                    )}
+                    <div className="text-slate-600">Mobile: {quotationOrder.customer_mobile}</div>
+                    {quotationOrder.customer_email && (
+                      <div className="text-slate-600">Email: {quotationOrder.customer_email}</div>
+                    )}
+                    {quotationOrder.company_gstin ? (
+                      <div className="font-mono font-bold text-slate-800">GSTIN: {quotationOrder.company_gstin}</div>
+                    ) : (
+                      <div className="text-slate-400 text-[11px]">Consumer / Unregistered</div>
+                    )}
+                    <div className="text-slate-500 text-[11px] mt-1">
+                      {quotationOrder.billing_address || "Connaught Place, New Delhi"}
+                    </div>
+                  </div>
+                  <div className="text-right space-y-1">
+                    {isSettled ? (
+                      <>
+                        <div className="font-mono font-black text-sm text-emerald-700">INVOICE NO: {invoiceNo}</div>
+                        <div className="text-slate-600 font-mono text-[11px]">Order Ref: {quotationOrder.order_no}</div>
+                        <div className="text-slate-600">Invoice Date: {invoiceDate}</div>
+                        <div className="text-slate-600">Delivery Date: {quotationOrder.delivery_date}</div>
+                        <div>
+                          <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase">
+                            SETTLED & PAID IN FULL
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-mono font-black text-sm text-[#081F5C]">QUOTE REF: {quotationOrder.order_no}</div>
+                        <div className="text-slate-600">Quote Date: {new Date().toLocaleDateString("en-IN")}</div>
+                        <div className="text-slate-600">Target Delivery: {quotationOrder.delivery_date}</div>
+                        <div>
+                          <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black uppercase">
+                            {quotationOrder.status}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <div className="font-mono font-black text-sm text-[#081F5C]">QUOTE: {quotationOrder.order_no}</div>
-                  <div className="text-slate-600">Date: {new Date().toLocaleDateString("en-IN")}</div>
-                  <div className="text-slate-600">Delivery Date: {quotationOrder.delivery_date}</div>
-                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase mt-1">
-                    {quotationOrder.status}
-                  </span>
-                </div>
-              </div>
 
-              {/* Items Table */}
-              <table className="w-full text-left text-xs border border-slate-200">
-                <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="p-2">Item Description</th>
-                    <th className="p-2 text-center">Boxes</th>
-                    <th className="p-2 text-right">Rate</th>
-                    <th className="p-2 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(quotationOrder.assortment || []).map((itm: any, idx: number) => (
-                    <tr key={idx}>
-                      <td className="p-2 font-bold">{itm.name || itm.sku}</td>
-                      <td className="p-2 text-center">{itm.boxes || itm.qty || 100}</td>
-                      <td className="p-2 text-right font-mono">₹{itm.unit_rate || 295}</td>
-                      <td className="p-2 text-right font-bold font-mono">
-                        ₹{(itm.line_total || (itm.boxes || 100) * (itm.unit_rate || 295)).toLocaleString("en-IN")}
-                      </td>
+                {/* Items Table */}
+                <table className="w-full text-left text-xs border border-slate-200">
+                  <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="p-2 w-8 text-center">#</th>
+                      <th className="p-2">Item Description</th>
+                      <th className="p-2 text-center">HSN/SAC</th>
+                      <th className="p-2 text-center">Boxes / Qty</th>
+                      <th className="p-2 text-right">Rate (₹)</th>
+                      <th className="p-2 text-right">Amount (₹)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(quotationOrder.assortment || []).map((itm: any, idx: number) => {
+                      const qty = itm.boxes || itm.qty || 100;
+                      const rate = itm.unit_rate || 295;
+                      const lineAmt = itm.line_total || qty * rate;
+                      return (
+                        <tr key={idx}>
+                          <td className="p-2 text-center text-slate-400">{idx + 1}</td>
+                          <td className="p-2 font-bold">
+                            {itm.name || itm.sku}
+                            {itm.uom && <span className="text-slate-400 font-normal ml-1">({itm.uom})</span>}
+                          </td>
+                          <td className="p-2 text-center font-mono text-slate-500">2106 90 99</td>
+                          <td className="p-2 text-center font-semibold">{qty}</td>
+                          <td className="p-2 text-right font-mono">₹{rate.toLocaleString("en-IN")}</td>
+                          <td className="p-2 text-right font-bold font-mono">
+                            ₹{lineAmt.toLocaleString("en-IN")}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
 
-              {/* Financial Totals & Scannable Barcode */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-3 border-t gap-4">
-                <div className="flex items-center gap-3">
-                  <BarcodeSvg value={quotationOrder.order_no} height={44} showText={true} />
+                {/* Financial Totals & Scannable Barcode */}
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between pt-3 border-t gap-4">
+                  <div className="flex flex-col gap-2">
+                    <BarcodeSvg value={isSettled ? invoiceNo : quotationOrder.order_no} height={42} showText={true} />
+                    <div className="text-[10px] text-slate-500 font-mono">
+                      Doc Ref: {quotationOrder.order_no} • {isSettled ? "VERIFIED TAX INVOICE" : "ESTIMATE RECORD"}
+                    </div>
+                  </div>
+
+                  <div className="w-72 space-y-1.5 text-xs ml-auto">
+                    <div className="flex justify-between text-slate-600">
+                      <span>Taxable Value:</span>
+                      <span className="font-mono">
+                        ₹{taxableVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>CGST (2.5%):</span>
+                      <span className="font-mono">
+                        ₹{cgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600">
+                      <span>SGST (2.5%):</span>
+                      <span className="font-mono">
+                        ₹{sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-bold text-slate-900 pt-1 border-t">
+                      <span>Total Invoice Value:</span>
+                      <span className="font-mono font-black text-sm text-[#081F5C]">
+                        ₹{totalAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700 font-bold">
+                      <span>Advance Received:</span>
+                      <span className="font-mono">
+                        ₹{advPaid.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    {isSettled ? (
+                      <>
+                        <div className="flex justify-between text-teal-700 font-bold">
+                          <span>Balance Settled:</span>
+                          <span className="font-mono">
+                            ₹{(totalAmt - advPaid).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between font-black text-sm pt-1 border-t text-emerald-700 bg-emerald-50 px-2 py-1 rounded">
+                          <span>Balance Due:</span>
+                          <span className="font-mono">₹0.00 (PAID IN FULL)</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between font-black text-sm pt-1 border-t text-rose-700 bg-rose-50 px-2 py-1 rounded">
+                        <span>Balance Due:</span>
+                        <span className="font-mono">
+                          ₹{balDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="w-64 space-y-1 text-xs ml-auto">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span className="font-mono font-bold">₹{Number(quotationOrder.selling_total || 46500).toLocaleString("en-IN")}</span>
+
+                {/* Terms & Authorized Signatory */}
+                <div className="grid grid-cols-2 gap-4 pt-3 border-t text-[10px] text-slate-600">
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-slate-800 uppercase">Terms & Conditions:</div>
+                    <div>1. Goods once sold will not be returned or exchanged.</div>
+                    <div>2. Sweets & Mithai must be stored in cool & dry conditions.</div>
+                    <div>3. All disputes subject to Delhi jurisdiction only.</div>
                   </div>
-                  <div className="flex justify-between text-emerald-700 font-bold">
-                    <span>Advance Received:</span>
-                    <span className="font-mono">₹{Number(quotationOrder.advance_paid || 0).toLocaleString("en-IN")}</span>
+                  <div className="text-right space-y-1">
+                    <div className="font-bold text-slate-800">For BIKANERVALA FOODS PVT LTD</div>
+                    <div className="h-10 flex items-end justify-end">
+                      <span className="inline-block border-t border-slate-400 px-4 pt-0.5 text-[9px] text-slate-500">
+                        Authorized Signatory
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex justify-between font-black text-sm pt-1 border-t text-[#081F5C]">
-                    <span>Balance Due:</span>
-                    <span className="font-mono">
-                      ₹{Math.max(0, Number(quotationOrder.selling_total || 46500) - Number(quotationOrder.advance_paid || 0)).toLocaleString("en-IN")}
-                    </span>
+                </div>
+
+                {/* Document Footer */}
+                <div className="pt-2 border-t text-center text-[10px] text-slate-500 space-y-0.5">
+                  <div className="font-bold text-slate-800">Taste of Tradition • Fresh Thinking • Smarter Retail</div>
+                  <div>
+                    {isSettled
+                      ? "Official GST Tax Invoice • "
+                      : "Computer generated estimate & quotation • "}
+                    Software Development by Annavya ERP (www.annavya.in)
                   </div>
                 </div>
               </div>
 
-              {/* Document Footer */}
-              <div className="pt-2 border-t text-center text-[10px] text-slate-500 space-y-0.5">
-                <div className="font-bold text-slate-800">Taste of Tradition • Fresh Thinking</div>
-                <div>Computer generated estimate & quotation • Software Development by Annavya ERP (www.annavya.in)</div>
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowQuotationModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className={`px-5 py-2.5 rounded-xl text-white font-extrabold shadow flex items-center gap-1.5 transition ${
+                    isSettled
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-[#081F5C] hover:bg-blue-900"
+                  }`}
+                  title="Print directly to connected default printer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>
+                    {isSettled
+                      ? "Print Tax Invoice (Default Printer)"
+                      : "Print A4 Quotation (Default Printer)"}
+                  </span>
+                </button>
               </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="px-5 py-2.5 rounded-xl bg-[#081F5C] hover:bg-blue-900 text-white font-extrabold shadow flex items-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print A4 Quotation (PDF)</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Decline Reason Modal */}
       {declineTargetOrder && (

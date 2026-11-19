@@ -409,11 +409,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg transition-all ${
-            toast.ok
-              ? "bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/70 dark:border-emerald-700 dark:text-emerald-200"
-              : "bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-950/70 dark:border-rose-700 dark:text-rose-200"
-          }`}
+          className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between shadow-lg transition-all ${toast.ok
+            ? "bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/70 dark:border-emerald-700 dark:text-emerald-200"
+            : "bg-rose-50 border-rose-300 text-rose-900 dark:bg-rose-950/70 dark:border-rose-700 dark:text-rose-200"
+            }`}
         >
           <div className="flex items-center gap-2">
             {toast.ok ? (
@@ -457,21 +456,19 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
           <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-bold">
             <button
               onClick={() => setOrderTakingTab("entry")}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                orderTakingTab === "entry"
-                  ? "bg-[#081F5C] text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400"
-              }`}
+              className={`px-3 py-1.5 rounded-lg transition ${orderTakingTab === "entry"
+                ? "bg-[#081F5C] text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400"
+                }`}
             >
               Floor & Order Taking
             </button>
             <button
               onClick={() => setOrderTakingTab("kds_progress")}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${
-                orderTakingTab === "kds_progress"
-                  ? "bg-amber-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400"
-              }`}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition ${orderTakingTab === "kds_progress"
+                ? "bg-amber-600 text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400"
+                }`}
             >
               <Flame className="w-3.5 h-3.5" />
               <span>Kitchen KDS Progress ({activeKots.length})</span>
@@ -511,11 +508,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                   <button
                     key={sec}
                     onClick={() => setSelectedSection(sec)}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
-                      selectedSection === sec
-                        ? "bg-[#081F5C] dark:bg-[#1246A8] text-white shadow-sm"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
-                    }`}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${selectedSection === sec
+                      ? "bg-[#081F5C] dark:bg-[#1246A8] text-white shadow-sm"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200"
+                      }`}
                   >
                     {sec}
                   </button>
@@ -536,15 +532,14 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                     <button
                       key={t.id || t.table_code}
                       onClick={() => handleSelectTable(t.table_code)}
-                      className={`p-3 rounded-2xl border-2 text-left transition relative flex flex-col justify-between ${
-                        isSelected
-                          ? "border-[#1246A8] bg-[#EBF4FF] dark:bg-blue-950/60 ring-2 ring-[#1246A8]/40"
-                          : isRunning
+                      className={`p-3 rounded-2xl border-2 text-left transition relative flex flex-col justify-between ${isSelected
+                        ? "border-[#1246A8] bg-[#EBF4FF] dark:bg-blue-950/60 ring-2 ring-[#1246A8]/40"
+                        : isRunning
                           ? "border-amber-400/80 bg-amber-50/70 dark:bg-amber-950/30"
                           : isOccupied
-                          ? "border-sky-300 bg-sky-50 dark:bg-sky-950/30"
-                          : "border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] hover:border-slate-400"
-                      }`}
+                            ? "border-sky-300 bg-sky-50 dark:bg-sky-950/30"
+                            : "border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] hover:border-slate-400"
+                        }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-mono font-black text-sm text-[#081F5C] dark:text-[#F8F3E6]">
@@ -560,13 +555,12 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                           {t.section || t.floor_name}
                         </span>
                         <span
-                          className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                            isRunning
-                              ? "bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200 animate-pulse"
-                              : isOccupied
+                          className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${isRunning
+                            ? "bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-200 animate-pulse"
+                            : isOccupied
                               ? "bg-sky-200 text-sky-900 dark:bg-sky-900 dark:text-sky-200"
                               : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                          }`}
+                            }`}
                         >
                           {isRunning ? "KOT Running" : t.status}
                         </span>
@@ -619,11 +613,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition ${
-                      selectedCategory === cat
-                        ? "bg-[#1246A8] text-white shadow"
-                        : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition ${selectedCategory === cat
+                      ? "bg-[#1246A8] text-white shadow"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                      }`}
                   >
                     {cat}
                   </button>
@@ -649,20 +642,18 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                   return (
                     <div
                       key={dish.sku}
-                      className={`p-3 rounded-2xl border transition text-left flex flex-col justify-between ${
-                        inCart
-                          ? "border-[#1246A8] bg-[#F0F5FF] dark:bg-blue-950/40 shadow-sm"
-                          : "border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] hover:border-slate-400"
-                      }`}
+                      className={`p-3 rounded-2xl border transition text-left flex flex-col justify-between ${inCart
+                        ? "border-[#1246A8] bg-[#F0F5FF] dark:bg-blue-950/40 shadow-sm"
+                        : "border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0F172A] hover:border-slate-400"
+                        }`}
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold truncate max-w-[120px] ${
-                              isSweet
-                                ? "bg-amber-100 text-amber-900 border border-amber-300"
-                                : "bg-sky-100 text-sky-900"
-                            }`}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold truncate max-w-[120px] ${isSweet
+                              ? "bg-amber-100 text-amber-900 border border-amber-300"
+                              : "bg-sky-100 text-sky-900"
+                              }`}
                           >
                             {isSweet ? "Sweet Counter" : dish.kitchen_station || "Kitchen"}
                           </span>
@@ -779,11 +770,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                                 </span>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   <span
-                                    className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
-                                      isSweet
-                                        ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"
-                                        : "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300"
-                                    }`}
+                                    className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${isSweet
+                                      ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+                                      : "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300"
+                                      }`}
                                   >
                                     {it.station || "Kitchen"}
                                   </span>
@@ -799,23 +789,22 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
 
                             <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-100 dark:border-slate-800">
                               <span
-                                className={`font-semibold ${
-                                  isSweet
-                                    ? "text-amber-700 font-bold"
-                                    : isReady
+                                className={`font-semibold ${isSweet
+                                  ? "text-amber-700 font-bold"
+                                  : isReady
                                     ? "text-emerald-600 dark:text-emerald-400 font-bold"
                                     : isCooking
-                                    ? "text-amber-600 dark:text-amber-400 font-bold"
-                                    : "text-sky-600 dark:text-sky-400"
-                                }`}
+                                      ? "text-amber-600 dark:text-amber-400 font-bold"
+                                      : "text-sky-600 dark:text-sky-400"
+                                  }`}
                               >
                                 {isSweet
                                   ? "🍯 Sweet Counter (Estimate Issued)"
                                   : isReady
-                                  ? "✓ Ready to Serve"
-                                  : isCooking
-                                  ? "🔥 Cooking in Kitchen"
-                                  : "⏱️ Queued in KDS"}
+                                    ? "✓ Ready to Serve"
+                                    : isCooking
+                                      ? "🔥 Cooking in Kitchen"
+                                      : "⏱️ Queued in KDS"}
                               </span>
                               {it.modifiers && (
                                 <span className="text-slate-500 italic truncate max-w-[140px]">
@@ -1130,11 +1119,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
               return (
                 <div
                   key={k.id}
-                  className={`rounded-2xl border p-4 shadow-sm space-y-3 transition ${
-                    isAllReady
-                      ? "bg-emerald-50/70 border-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-700"
-                      : "bg-white dark:bg-[#0C1324] border-slate-200 dark:border-slate-800"
-                  }`}
+                  className={`rounded-2xl border p-4 shadow-sm space-y-3 transition ${isAllReady
+                    ? "bg-emerald-50/70 border-emerald-400 dark:bg-emerald-950/30 dark:border-emerald-700"
+                    : "bg-white dark:bg-[#0C1324] border-slate-200 dark:border-slate-800"
+                    }`}
                 >
                   <div className="flex justify-between items-start border-b border-slate-100 dark:border-slate-800 pb-2.5">
                     <div>
@@ -1152,11 +1140,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                     </div>
 
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        isAllReady
-                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse"
-                          : "bg-amber-100 text-amber-800 border border-amber-300"
-                      }`}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isAllReady
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-300 animate-pulse"
+                        : "bg-amber-100 text-amber-800 border border-amber-300"
+                        }`}
                     >
                       {isAllReady ? "ALL DISHES READY" : k.status}
                     </span>
@@ -1175,13 +1162,12 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                       return (
                         <div
                           key={idx}
-                          className={`p-2 rounded-xl border text-xs space-y-1 ${
-                            isReady
-                              ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800/60"
-                              : isCooking
+                          className={`p-2 rounded-xl border text-xs space-y-1 ${isReady
+                            ? "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/40 dark:border-emerald-800/60"
+                            : isCooking
                               ? "bg-amber-50/60 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800/60"
                               : "bg-slate-50 border-slate-200 dark:bg-slate-800/40 dark:border-slate-700"
-                          }`}
+                            }`}
                         >
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-slate-900 dark:text-white">
@@ -1194,23 +1180,22 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
 
                           <div className="flex justify-between items-center text-[10px]">
                             <span
-                              className={`font-semibold ${
-                                isSweet
-                                  ? "text-amber-700 font-bold"
-                                  : isReady
+                              className={`font-semibold ${isSweet
+                                ? "text-amber-700 font-bold"
+                                : isReady
                                   ? "text-emerald-700 dark:text-emerald-400 font-extrabold flex items-center gap-1"
                                   : isCooking
-                                  ? "text-amber-700 dark:text-amber-400 font-bold"
-                                  : "text-sky-700 dark:text-sky-400"
-                              }`}
+                                    ? "text-amber-700 dark:text-amber-400 font-bold"
+                                    : "text-sky-700 dark:text-sky-400"
+                                }`}
                             >
                               {isSweet
                                 ? "🍯 Sweet Counter (Estimate Issued)"
                                 : isReady
-                                ? "✓ Plated & Ready to Serve!"
-                                : isCooking
-                                ? "🔥 Cooking in Wok"
-                                : "⏱️ Queued in KDS"}
+                                  ? "✓ Plated & Ready to Serve!"
+                                  : isCooking
+                                    ? "🔥 Cooking in Wok"
+                                    : "⏱️ Queued in KDS"}
                             </span>
                             <span className="font-mono text-slate-400">
                               {isReady ? "100%" : isCooking ? "65%" : "25%"}
@@ -1278,11 +1263,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                 <button
                   type="button"
                   onClick={() => setSettleMode("UPI")}
-                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${
-                    settleMode === "UPI"
-                      ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200 ring-2 ring-emerald-500/30"
-                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                  }`}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${settleMode === "UPI"
+                    ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200 ring-2 ring-emerald-500/30"
+                    : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                    }`}
                 >
                   <QrCode className="w-5 h-5 text-emerald-600" />
                   <span>UPI QR Code</span>
@@ -1291,11 +1275,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                 <button
                   type="button"
                   onClick={() => setSettleMode("Card")}
-                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${
-                    settleMode === "Card"
-                      ? "border-sky-500 bg-sky-50/70 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200 ring-2 ring-sky-500/30"
-                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                  }`}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${settleMode === "Card"
+                    ? "border-sky-500 bg-sky-50/70 text-sky-900 dark:bg-sky-950/50 dark:text-sky-200 ring-2 ring-sky-500/30"
+                    : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                    }`}
                 >
                   <CreditCard className="w-5 h-5 text-sky-600" />
                   <span>Card / POS EDC</span>
@@ -1304,11 +1287,10 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                 <button
                   type="button"
                   onClick={() => setSettleMode("Cash")}
-                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${
-                    settleMode === "Cash"
-                      ? "border-amber-500 bg-amber-50/70 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 ring-2 ring-amber-500/30"
-                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                  }`}
+                  className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 font-bold text-xs transition ${settleMode === "Cash"
+                    ? "border-amber-500 bg-amber-50/70 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 ring-2 ring-amber-500/30"
+                    : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                    }`}
                 >
                   <Banknote className="w-5 h-5 text-amber-600" />
                   <span>Manual Cash</span>

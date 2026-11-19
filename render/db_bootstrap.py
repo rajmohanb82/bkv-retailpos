@@ -70,12 +70,14 @@ def apply_schema_migrations(cur):
         ("pos_mod.pos_orders", "customer_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(120);"),
         ("pos_mod.pos_orders", "customer_mobile", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_mobile VARCHAR(20);"),
 
-        # 5. oms_mod.bulk_orders (Corporate & Wedding hampers fields 1-6 & PDF)
+        # 5. oms_mod.bulk_orders (Corporate & Wedding hampers fields 1-6 & PDF & Tax Invoice)
         ("oms_mod.bulk_orders", "customer_email", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);"),
         ("oms_mod.bulk_orders", "company_gstin", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS company_gstin VARCHAR(32);"),
         ("oms_mod.bulk_orders", "billing_address", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS billing_address TEXT;"),
         ("oms_mod.bulk_orders", "shipping_address", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS shipping_address TEXT;"),
         ("oms_mod.bulk_orders", "quotation_pdf_url", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS quotation_pdf_url TEXT;"),
+        ("oms_mod.bulk_orders", "invoice_no", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS invoice_no VARCHAR(40);"),
+        ("oms_mod.bulk_orders", "invoiced_at", "ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMPTZ;"),
 
         # 6. kot_mod.dining_tables (Restaurant floor alignment)
         ("kot_mod.dining_tables", "floor_name", "ALTER TABLE kot_mod.dining_tables ADD COLUMN IF NOT EXISTS floor_name VARCHAR(60) DEFAULT 'Ground Floor';"),

@@ -152,8 +152,8 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
     `Date: ${new Date().toLocaleString("en-IN")}`,
     ...(order?.customer_name || order?.customer_mobile
       ? [
-          `Cust: ${(order.customer_name || "Walk-in").slice(0, 24)} | Mob: ${(order.customer_mobile || "").slice(0, 10)}`,
-        ]
+        `Cust: ${(order.customer_name || "Walk-in").slice(0, 24)} | Mob: ${(order.customer_mobile || "").slice(0, 10)}`,
+      ]
       : []),
     "----------------------------------------",
     "ITEM               QTY/WT        AMOUNT ",
@@ -170,12 +170,12 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
   if (Number(order?.discount_amount || 0) > 0) {
     lines.push(
       padRight(`Disc (${order?.discount_category || "PROMO"}):`, 26) +
-        padLeft(`-${Number(order.discount_amount).toFixed(2)}`, 14)
+      padLeft(`-${Number(order.discount_amount).toFixed(2)}`, 14)
     );
   }
   lines.push(
     padRight("CGST + SGST:", 26) +
-      padLeft((Number(order?.cgst || 0) + Number(order?.sgst || 0)).toFixed(2), 14)
+    padLeft((Number(order?.cgst || 0) + Number(order?.sgst || 0)).toFixed(2), 14)
   );
   lines.push("========================================");
   lines.push(
@@ -307,22 +307,20 @@ export async function print40ColumnThermalSlip(
   <div class="center" style="font-size:9px;color:#333;">${outlet?.address || "Block B-14, Inner Circle, Connaught Place, New Delhi - 110001"}</div>
   <div class="center bold" style="font-size:9.5px;margin-top:2px;">GSTIN: ${outlet?.gstin || "07AAACB1234F1Z5"}</div>
   <div class="center bold" style="font-size:9.5px;">FSSAI Lic No: ${outlet?.fssai_no || "13324001000451"}</div>
-  ${
-    isPaid
-      ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;background:#000;color:#fff;padding:2px 8px;display:inline-block;font-size:11px;">TAX INVOICE</div>`
-      : isProforma
-      ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** PROFORMA INVOICE / TABLE CHECK ***</div>`
-      : `<div class="center bold" style="margin:4px auto;border:1.5px dashed #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** ESTIMATE SLIP - NOT A BILL ***</div>`
-  }
+  ${isPaid
+        ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;background:#000;color:#fff;padding:2px 8px;display:inline-block;font-size:11px;">TAX INVOICE</div>`
+        : isProforma
+          ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** PROFORMA INVOICE / TABLE CHECK ***</div>`
+          : `<div class="center bold" style="margin:4px auto;border:1.5px dashed #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** ESTIMATE SLIP - NOT A BILL ***</div>`
+      }
   <div class="line"></div>
   <div class="row"><span>${isPaid ? "INV" : isProforma ? "PROFORMA" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code || "DEL01"}</span></div>
   ${order.table_code ? `<div class="row"><span>Dining Table: <b>${order.table_code}</b></span><span>Token: <b>#${last4}</b></span></div>` : `<div class="row"><span>Token Last-4: <b>#${last4}</b></span><span>${new Date().toLocaleTimeString("en-IN")}</span></div>`}
-  ${
-    order.customer_name || order.customer_mobile
-      ? `<div class="row"><span>Customer:</span><span><b>${order.customer_name || "Guest"}</b></span></div>
+  ${order.customer_name || order.customer_mobile
+        ? `<div class="row"><span>Customer:</span><span><b>${order.customer_name || "Guest"}</b></span></div>
          ${order.customer_mobile ? `<div class="row"><span>Mobile:</span><span><b>${order.customer_mobile}</b></span></div>` : ""}`
-      : ""
-  }
+        : ""
+      }
   <div class="line"></div>
   <table>
     <thead>
@@ -336,20 +334,18 @@ export async function print40ColumnThermalSlip(
   </table>
   <div class="line"></div>
   <div class="row"><span>Subtotal</span><span>Rs.${Number(order.subtotal || 0).toFixed(2)}</span></div>
-  ${
-    Number(order.discount_amount || 0) > 0
-      ? `<div class="row"><span>Disc (${order.discount_category || "PROMO"})</span><span>-Rs.${Number(order.discount_amount).toFixed(2)}</span></div>`
-      : ""
-  }
+  ${Number(order.discount_amount || 0) > 0
+        ? `<div class="row"><span>Disc (${order.discount_category || "PROMO"})</span><span>-Rs.${Number(order.discount_amount).toFixed(2)}</span></div>`
+        : ""
+      }
   <div class="row"><span>CGST + SGST (5%)</span><span>Rs.${(Number(order.cgst || 0) + Number(order.sgst || 0)).toFixed(2)}</span></div>
   <div class="line"></div>
   <div class="row bold" style="font-size:13px;"><span>GRAND TOTAL</span><span>Rs.${Number(order.grand_total || 0).toFixed(2)}</span></div>
   ${isPaid && splitsHtml ? `<div class="line"></div><div class="bold" style="font-size:10px;">TENDER SPLITS:</div>${splitsHtml}` : ""}
   
   <!-- DYNAMIC UPI QR CODE -->
-  ${
-    upiQrSvgHtml
-      ? `
+  ${upiQrSvgHtml
+        ? `
   <div class="line"></div>
   <div class="center" style="margin:5px 0 3px 0;">
     <div class="bold" style="font-size:10px;letter-spacing:0.5px;margin-bottom:2px;">SCAN & PAY VIA UPI</div>
@@ -359,8 +355,8 @@ export async function print40ColumnThermalSlip(
     <div style="font-size:8.5px;color:#000;font-weight:700;margin-top:2px;">GPay • PhonePe • Paytm • BHIM UPI</div>
     <div style="font-size:8px;color:#444;">UPI ID: bikanervala.retail@icici</div>
   </div>`
-      : ""
-  }
+        : ""
+      }
 
   <!-- CRISP SCANNABLE BARCODE -->
   <div class="line"></div>

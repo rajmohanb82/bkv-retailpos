@@ -47,6 +47,18 @@ def ensure_oms_tables():
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """)
+            conn.execute("""
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS invoice_no VARCHAR(40);
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMPTZ;
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS company_gstin VARCHAR(32);
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS billing_address TEXT;
+                ALTER TABLE oms_mod.bulk_orders ADD COLUMN IF NOT EXISTS shipping_address TEXT;
+                UPDATE oms_mod.bulk_orders
+                SET invoice_no = 'INV-BULK-' || COALESCE(outlet_code, 'DEL01') || '-' || REPLACE(REPLACE(order_no, 'OMS-', ''), 'ORD-', ''),
+                    invoiced_at = COALESCE(invoiced_at, NOW())
+                WHERE invoice_no IS NULL AND (status IN ('COMPLETED', 'SETTLED') OR balance_due <= 0);
+            """)
     except Exception as e:
         print(f"[OMS Service] Warning on ensure_oms_tables: {e}")
 
@@ -417,6 +429,7 @@ def record_payment(order_id: int, payload: OmsPaymentPayload):
         new_adv = round(float(order["advance_paid"]) + payload.amount, 2)
         new_bal = round(max(0.0, float(order["selling_total"]) - new_adv), 2)
         new_status = order["status"]
+        inv_no = order.get("invoice_no")
         prod_triggered = False
         if order["status"] in ("ENQUIRY", "QUOTATION") and new_adv > 0:
             new_status = "CONFIRMED"
@@ -451,11 +464,26 @@ def record_payment(order_id: int, payload: OmsPaymentPayload):
 
         elif (new_bal <= 0 or payload.stage == "BALANCE_SETTLEMENT") and (payload.close_order or order["status"] in ("FOOD_READY", "READY_FOR_DELIVERY", "DISPATCHED", "QC_READY", "CONFIRMED")):
             new_status = "COMPLETED"
+            if not inv_no:
+                clean_ref = (order["order_no"] or "").replace("OMS-", "").replace("ORD-", "")
+                outlet = order.get("outlet_code") or "DEL01"
+                inv_no = f"INV-BULK-{outlet}-{clean_ref or order_id}"
         elif new_bal == 0 and order["status"] in ("DISPATCHED", "QC_READY"):
             new_status = "SETTLED"
+            if not inv_no:
+                clean_ref = (order["order_no"] or "").replace("OMS-", "").replace("ORD-", "")
+                outlet = order.get("outlet_code") or "DEL01"
+                inv_no = f"INV-BULK-{outlet}-{clean_ref or order_id}"
+
         updated = conn.execute(
-            "UPDATE oms_mod.bulk_orders SET advance_paid = %s, balance_due = %s, status = %s WHERE id = %s RETURNING *",
-            (new_adv, new_bal, new_status, order_id),
+            """
+            UPDATE oms_mod.bulk_orders 
+            SET advance_paid = %s, balance_due = %s, status = %s,
+                invoice_no = COALESCE(invoice_no, %s),
+                invoiced_at = CASE WHEN invoice_no IS NULL AND %s IS NOT NULL THEN NOW() ELSE invoiced_at END
+            WHERE id = %s RETURNING *
+            """,
+            (new_adv, new_bal, new_status, inv_no, inv_no, order_id),
         ).fetchone()
 
         whatsapp_receipt_msg = (
@@ -473,6 +501,8 @@ def record_payment(order_id: int, payload: OmsPaymentPayload):
             "status": updated["status"] if updated else new_status,
             "advance_paid": updated["advance_paid"] if updated else new_adv,
             "balance_due": updated["balance_due"] if updated else new_bal,
+            "invoice_no": updated.get("invoice_no") if updated else inv_no,
+            "invoiced_at": updated.get("invoiced_at") if updated else None,
             "receipt_no": rcpt,
             "production_triggered": prod_triggered,
             "production_orders_created": created_prods if "created_prods" in locals() else [],

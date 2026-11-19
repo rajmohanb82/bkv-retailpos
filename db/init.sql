@@ -346,6 +346,8 @@ CREATE TABLE oms_mod.bulk_orders (
     balance_due NUMERIC(12,2) NOT NULL,
     credit_limit NUMERIC(12,2) DEFAULT 0,
     production_req_no VARCHAR(30),
+    invoice_no VARCHAR(40),
+    invoiced_at TIMESTAMPTZ,
     dispatch_drops JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
