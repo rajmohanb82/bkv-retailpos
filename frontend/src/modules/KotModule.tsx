@@ -15,6 +15,7 @@ import {
   Filter,
   Check,
   ArrowRight,
+  Clock,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku } from "../types";
@@ -492,15 +493,9 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
                       </div>
 
                       {(t.status === "KOT Running" || t.status === "Bill Printed") && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            settleTable(t.table_code);
-                          }}
-                          className="mt-2.5 w-full py-1.5 rounded-xl bg-[#081F5C] text-white text-[10px] font-bold flex items-center justify-center gap-1 shadow-sm hover:bg-opacity-90"
-                        >
-                          <Receipt className="w-3 h-3" /> Settle & Close Bill
-                        </button>
+                        <div className="mt-2.5 w-full py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-semibold flex items-center justify-center gap-1 border border-slate-200 dark:border-slate-700">
+                          <Clock className="w-3 h-3 text-amber-500" /> Settle Bill via Order Taking
+                        </div>
                       )}
                     </div>
                   );

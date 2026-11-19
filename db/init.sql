@@ -361,6 +361,35 @@ CREATE TABLE oms_mod.oms_payments (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE oms_mod.aggregator_orders (
+    id SERIAL PRIMARY KEY,
+    platform VARCHAR(30) NOT NULL,
+    aggregator_order_id VARCHAR(60) UNIQUE NOT NULL,
+    display_order_no VARCHAR(40) NOT NULL,
+    outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+    customer_name VARCHAR(100) NOT NULL,
+    customer_mobile VARCHAR(20) NOT NULL,
+    delivery_address TEXT,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    item_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+    taxes NUMERIC(10,2) NOT NULL DEFAULT 0,
+    delivery_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+    packing_charge NUMERIC(10,2) NOT NULL DEFAULT 0,
+    grand_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+    status VARCHAR(30) NOT NULL DEFAULT 'PLACED',
+    prep_time_mins INT DEFAULT 20,
+    decline_reason VARCHAR(100),
+    decline_comment TEXT,
+    rider_name VARCHAR(80),
+    rider_mobile VARCHAR(20),
+    otp_code VARCHAR(10),
+    placed_at TIMESTAMPTZ DEFAULT NOW(),
+    accepted_at TIMESTAMPTZ,
+    ready_at TIMESTAMPTZ,
+    picked_up_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ==========================================
 -- 7. RETAIL POS & SHOP MANAGER MODULE (Modules 1 & 2)
 -- ==========================================
@@ -387,6 +416,9 @@ CREATE TABLE pos_mod.pos_orders (
     delivery_staff VARCHAR(80),
     paid_at TIMESTAMPTZ,
     delivered_at TIMESTAMPTZ,
+    customer_name VARCHAR(120),
+    customer_mobile VARCHAR(20),
+    linked_table VARCHAR(32),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -496,7 +528,7 @@ CREATE TABLE kot_mod.kots (
 
 -- Outlets (CO, Franchised, DO, Manufacturing)
 INSERT INTO admin_mod.outlets (code, name, legal_name, trade_name, ownership_type, outlet_type, gstin, gstn_verified, gstn_reg_type, gstn_verified_at, fssai_no, fssai_expiry, address, city, state, state_code, pincode, property_type, royalty_pct) VALUES
-('DEL01', 'Bikanervala Connaught Place Flagship', 'Bikanervala Foods Pvt. Ltd.', 'Bikanervala Heritage Sweets', 'CO', 'Sweet Shop', '07AAACB1234F1Z5', TRUE, 'Regular', NOW(), '13324001000451', CURRENT_DATE + INTERVAL '240 days', 'Block B-14, Inner Circle, Connaught Place', 'New Delhi', 'Delhi', '07', '110001', 'Leased', 0),
+('DEL01', 'Bikanervala Connaught Place Flagship', 'Bikanervala Foods Pvt. Ltd.', 'Bikanervala Heritage Sweets', 'CO', 'Restaurant + Sweet Shop', '07AAACB1234F1Z5', TRUE, 'Regular', NOW(), '13324001000451', CURRENT_DATE + INTERVAL '240 days', 'Block B-14, Inner Circle, Connaught Place', 'New Delhi', 'Delhi', '07', '110001', 'Leased', 0),
 ('GUR02', 'Bikanervala CyberHub Grand', 'Bikanervala Foods Pvt. Ltd.', 'Bikanervala Sweets & Restaurant', 'CO', 'Restaurant + Sweet Shop', '06AAACB1234F1Z3', TRUE, 'Regular', NOW(), '10824002000812', CURRENT_DATE + INTERVAL '310 days', 'Ground Floor, DLF CyberHub, Phase 2', 'Gurugram', 'Haryana', '06', '122002', 'Leased', 0),
 ('JAI03', 'Bikanervala MI Road Jaipur', 'Rajputana Hospitality Ventures LLP', 'Bikanervala Jaipur', 'Franchised', 'Restaurant + Sweet Shop', '08AAACB1234F1Z1', TRUE, 'Regular', NOW(), '12224003000199', CURRENT_DATE + INTERVAL '45 days', '42, Mirza Ismail Road, Panch Batti', 'Jaipur', 'Rajasthan', '08', '302001', 'Owned', 6.50),
 ('NOI04', 'Bikanervala Sector 18 Dine-In', 'Bikanervala Directors Hospitality Pvt Ltd', 'Bikanervala Bistro & Sweets', 'DO', 'Restaurant', '09AAACB1234F1Z8', TRUE, 'Regular', NOW(), '12724004000511', CURRENT_DATE + INTERVAL '190 days', 'Plot G-12, Sector 18 Market', 'Noida', 'Uttar Pradesh', '09', '201301', 'Owned', 0),
@@ -737,17 +769,34 @@ INSERT INTO pos_mod.outlet_indents (indent_no, outlet_code, sku, item_name, qty,
 ('IND-2026-015', 'GUR02', 'FG-BESAN-01', 'Desi Ghee Besan Laddu', 40.0, 'kg', 'NORMAL', 'PLANNED');
 
 -- KOT Tables & Active KOTs
-INSERT INTO kot_mod.dining_tables (outlet_code, table_code, section, capacity, status, current_pax) VALUES
-('GUR02', 'T-01', 'AC Hall', 4, 'KOT Running', 3),
-('GUR02', 'T-02', 'AC Hall', 4, 'Available', 0),
-('GUR02', 'T-03', 'AC Hall', 6, 'Bill Printed', 5),
-('GUR02', 'T-04', 'Family Section', 8, 'Occupied', 6),
-('GUR02', 'T-05', 'Garden', 4, 'Available', 0),
-('GUR02', 'T-06', 'Garden', 2, 'Cleaning', 0),
-('NOI04', 'T-01', 'AC Hall', 4, 'KOT Running', 2),
-('NOI04', 'T-02', 'AC Hall', 4, 'Available', 0),
-('JAI03', 'T-01', 'Heritage Courtyard', 6, 'Available', 0),
-('JAI03', 'T-02', 'Heritage Courtyard', 4, 'KOT Running', 4);
+INSERT INTO kot_mod.dining_tables (outlet_code, table_code, section, capacity, status, current_pax, floor_name) VALUES
+('DEL01', 'T-01', 'Main Dining Hall', 4, 'KOT Running', 2, 'Ground Floor'),
+('DEL01', 'T-02', 'Main Dining Hall', 4, 'Available', 0, 'Ground Floor'),
+('DEL01', 'T-03', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+('DEL01', 'T-04', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+('DEL01', 'T-05', 'Family Lounge', 8, 'Available', 0, 'Ground Floor'),
+('DEL01', 'T-11', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+('DEL01', 'T-12', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+('DEL01', 'T-13', 'Family Banquet Section', 10, 'Available', 0, 'First Floor'),
+('DEL01', 'T-21', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden'),
+('DEL01', 'T-22', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden'),
+('GUR02', 'T-01', 'AC Hall', 4, 'KOT Running', 3, 'Ground Floor'),
+('GUR02', 'T-02', 'AC Hall', 4, 'Available', 0, 'Ground Floor'),
+('GUR02', 'T-03', 'AC Hall', 6, 'Bill Printed', 5, 'Ground Floor'),
+('GUR02', 'T-04', 'Family Section', 8, 'Occupied', 6, 'Ground Floor'),
+('GUR02', 'T-05', 'Garden', 4, 'Available', 0, 'Ground Floor'),
+('GUR02', 'T-06', 'Garden', 2, 'Cleaning', 0, 'Ground Floor'),
+('NOI04', 'T-01', 'AC Hall', 4, 'Available', 0, 'Ground Floor'),
+('NOI04', 'T-02', 'AC Hall', 4, 'Available', 0, 'Ground Floor'),
+('JAI03', 'T-01', 'Heritage Courtyard', 6, 'Available', 0, 'Ground Floor'),
+('JAI03', 'T-02', 'Heritage Courtyard', 4, 'Available', 0, 'Ground Floor');
+
+INSERT INTO kot_mod.kots (kot_no, outlet_code, table_code, order_source, captain_name, items, status, total_amount) VALUES
+('KOT-DEL01-101', 'DEL01', 'T-01', 'TABLE_ORDER', 'Vikram Sethi', '[
+  {"sku":"RST-CHAAT-01","name":"Annavya Special Raj Kachori","qty":2,"unit_price":185,"station":"Chaat","modifiers":"Extra Meethi Saunth, Less Curd","course":"Starter","station_status":"Ready"},
+  {"sku":"RST-TAND-01","name":"Paneer Lababdar + 2 Butter Naan","qty":1,"unit_price":395,"station":"Tandoor","modifiers":"Jain Preparation","course":"Main","station_status":"Preparing"},
+  {"sku":"FG-RAS-01","name":"Spongy White Rasgulla (2 pcs)","qty":2,"unit_price":120,"station":"Sweet Counter","modifiers":"Serve Chilled","course":"Dessert","station_status":"Ready"}
+]'::jsonb, 'ACTIVE', 885.00),
 
 INSERT INTO kot_mod.kots (kot_no, outlet_code, table_code, order_source, captain_name, items, status, total_amount) VALUES
 ('KOT-GUR02-105', 'GUR02', 'T-01', 'DINE_IN', 'Arjun Negi', '[
@@ -763,4 +812,13 @@ INSERT INTO kot_mod.kots (kot_no, outlet_code, table_code, order_source, captain
   {"sku":"RST-CHAAT-02","name":"Dilli Crispy Aloo Tikki Chaat","qty":2,"unit_price":145,"station":"Chaat","modifiers":"Pack chutney separate","course":"Pack","station_status":"Preparing"},
   {"sku":"RST-TAND-02","name":"Dal Makhani Bukhara Style","qty":1,"unit_price":320,"station":"Tandoor","modifiers":"Extra Cream","course":"Pack","station_status":"Queued"}
 ]'::jsonb, 'ACTIVE', 610.00);
+
+-- Initial Aggregator Orders
+INSERT INTO oms_mod.aggregator_orders 
+(platform, aggregator_order_id, display_order_no, outlet_code, customer_name, customer_mobile, delivery_address, items, item_total, taxes, delivery_fee, packing_charge, grand_total, status, prep_time_mins, rider_name, rider_mobile, otp_code)
+VALUES
+('ZOMATO', 'ZOM-8841-LIVE', 'ZOM#8841', 'DEL01', 'Rohit Malhotra', '+91-9811223344', 'Flat 402, Barakhamba Road, Connaught Place', '[{"sku":"RST-CHAAT-01","name":"Annavya Special Raj Kachori","qty":2,"price":185},{"sku":"FG-KAJU-01","name":"Royal Silver-Leaf Kaju Katli (500g)","qty":1,"price":590}]'::jsonb, 960.00, 48.00, 35.00, 20.00, 1063.00, 'PLACED', 20, 'Vikas Kumar', '+91-9871002233', '4812'),
+('SWIGGY', 'SWG-4412-LIVE', 'SWG#4412', 'DEL01', 'Ananya Gupta', '+91-9877112233', 'Suite 12, Janpath, New Delhi', '[{"sku":"RST-TAND-01","name":"Paneer Lababdar + 2 Butter Naan","qty":1,"price":395},{"sku":"FG-RAS-01","name":"Spongy White Rasgulla (1kg)","qty":1,"price":480}]'::jsonb, 875.00, 43.75, 40.00, 25.00, 983.75, 'PLACED', 15, 'Suresh Rawat', '+91-9911445566', '7129')
+ON CONFLICT (aggregator_order_id) DO NOTHING;
+
 

@@ -31,7 +31,9 @@ class TableSettlePayload(BaseModel):
     outlet_code: str
     table_code: str
     payment_mode: str = "UPI"
-    cashier_id: str = "Priya Sharma"
+    payment_ref: str = ""
+    cashier_id: str = "Order Taking Captain"
+    discount_amount: float = 0.0
 
 
 class TableStatusUpdate(BaseModel):
@@ -145,10 +147,32 @@ def generate_two_slip_kot(kot_no: str, outlet_code: str, table_code: str, captai
 @app.get("/tables")
 def list_tables(outlet_code: str = "GUR02"):
     with get_conn() as conn:
-        return conn.execute(
+        code = outlet_code.upper()
+        tables = conn.execute(
             "SELECT * FROM kot_mod.dining_tables WHERE outlet_code = %s ORDER BY table_code",
-            (outlet_code.upper(),),
+            (code,),
         ).fetchall()
+        if not tables and code == "DEL01":
+            # Auto-seed default DEL01 tables if empty
+            conn.execute("""
+                INSERT INTO kot_mod.dining_tables (outlet_code, table_code, section, capacity, status, current_pax, floor_name) VALUES
+                ('DEL01', 'T-01', 'Main Dining Hall', 4, 'Available', 0, 'Ground Floor'),
+                ('DEL01', 'T-02', 'Main Dining Hall', 4, 'Available', 0, 'Ground Floor'),
+                ('DEL01', 'T-03', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+                ('DEL01', 'T-04', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+                ('DEL01', 'T-05', 'Family Lounge', 8, 'Available', 0, 'Ground Floor'),
+                ('DEL01', 'T-11', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+                ('DEL01', 'T-12', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+                ('DEL01', 'T-13', 'Family Banquet Section', 10, 'Available', 0, 'First Floor'),
+                ('DEL01', 'T-21', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden'),
+                ('DEL01', 'T-22', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden')
+                ON CONFLICT DO NOTHING;
+            """)
+            tables = conn.execute(
+                "SELECT * FROM kot_mod.dining_tables WHERE outlet_code = %s ORDER BY table_code",
+                (code,),
+            ).fetchall()
+        return tables
 
 
 @app.get("/kots")
@@ -309,88 +333,159 @@ def void_kot(kot_id: int, payload: KotVoidPayload):
 @app.post("/tables/settle")
 def settle_table(payload: TableSettlePayload):
     with get_conn() as conn:
+        outlet_code = payload.outlet_code.upper()
+        table_code = payload.table_code.upper()
+
         kots = conn.execute(
-            "SELECT * FROM kot_mod.kots WHERE outlet_code = %s AND table_code = %s AND status IN ('ACTIVE', 'READY', 'SERVED')",
-            (payload.outlet_code, payload.table_code),
+            "SELECT * FROM kot_mod.kots WHERE outlet_code = %s AND table_code = %s AND status IN ('ACTIVE', 'READY', 'SERVED', 'COOKING', 'QUEUED')",
+            (outlet_code, table_code),
         ).fetchall()
+
         if not kots:
-            raise HTTPException(status_code=400, detail="No active KOT found for this table")
+            # Release table cleanly without 400 error if no pending orders
+            conn.execute(
+                "UPDATE kot_mod.dining_tables SET status = 'Available', current_pax = 0 WHERE outlet_code = %s AND table_code = %s",
+                (outlet_code, table_code),
+            )
+            # Also close any pending sweet estimates for this table if any
+            conn.execute(
+                """
+                UPDATE pos_mod.pos_orders
+                SET status = 'DELIVERED_CLOSED', paid_at = NOW(), cashier_id = %s
+                WHERE outlet_code = %s AND linked_table = %s AND status = 'ESTIMATE_GENERATED'
+                """,
+                (payload.cashier_id, outlet_code, table_code),
+            )
+            return {
+                "success": True,
+                "status": "released",
+                "message": f"Table {table_code} had no pending bill and has been reset to Available.",
+                "table_code": table_code,
+                "grand_total": 0,
+                "settled_kots_count": 0,
+            }
 
         aggregated_items = []
         subtotal = 0.0
         for k in kots:
-            for it in k["items"]:
+            items_list = k["items"] if isinstance(k["items"], list) else json.loads(k["items"])
+            for it in items_list:
                 price = float(it.get("unit_price", 150))
                 qty = float(it.get("qty", 1))
-                subtotal += price * qty
+                lt = round(price * qty, 2)
+                subtotal += lt
                 aggregated_items.append({
                     "sku": it["sku"],
                     "name": it.get("name", it["sku"]),
                     "qty": qty,
                     "unit_price": price,
-                    "uom": "pcs",
+                    "uom": it.get("uom", "pcs"),
                     "gst_pct": 5.0,
-                    "line_total": round(price * qty, 2),
+                    "line_total": lt,
                     "kot_no": k["kot_no"],
+                    "station": it.get("station", "Kitchen"),
                 })
 
-        cgst = round(subtotal * 0.025, 2)
-        sgst = round(subtotal * 0.025, 2)
-        grand_total = round(subtotal + cgst + sgst, 2)
+        disc = float(payload.discount_amount or 0.0)
+        net_subtotal = max(0.0, subtotal - disc)
+        cgst = round(net_subtotal * 0.025, 2)
+        sgst = round(net_subtotal * 0.025, 2)
+        grand_total = round(net_subtotal + cgst + sgst, 2)
 
         cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.pos_orders WHERE invoice_no IS NOT NULL").fetchone()["c"] + 39
-        inv_no = f"INV-REST-{payload.outlet_code}-{cnt:04d}"
-        est_no = f"EST-REST-{payload.outlet_code}-{cnt:04d}"
+        inv_no = f"INV-REST-{outlet_code}-{cnt:04d}"
+        est_no = f"EST-REST-{outlet_code}-{cnt:04d}"
 
-        # Insert POS order
+        # Insert POS order with linked_table
         order = conn.execute(
             """
             INSERT INTO pos_mod.pos_orders
-            (estimate_no, invoice_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, payment_splits, cashier_id, paid_at)
-            VALUES (%s,%s,%s,'RESTAURANT_DINE_IN','PAID',%s::jsonb,%s,0,'rest-hash',%s,%s,%s,%s::jsonb,%s,NOW())
+            (estimate_no, invoice_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, payment_splits, cashier_id, paid_at, linked_table)
+            VALUES (%s,%s,%s,'RESTAURANT_DINE_IN','DELIVERED_CLOSED',%s::jsonb,%s,%s,'rest-hash',%s,%s,%s,%s::jsonb,%s,NOW(),%s)
             RETURNING *
             """,
             (
-                est_no, inv_no, payload.outlet_code, json.dumps(aggregated_items),
-                round(subtotal, 2), cgst, sgst, grand_total,
-                json.dumps([{"mode": payload.payment_mode, "amount": grand_total, "ref": f"REST-{payload.table_code}"}]),
+                est_no, inv_no, outlet_code, json.dumps(aggregated_items),
+                round(subtotal, 2), disc, cgst, sgst, grand_total,
+                json.dumps([{"mode": payload.payment_mode, "amount": grand_total, "ref": payload.payment_ref or f"REST-{table_code}"}]),
                 payload.cashier_id,
+                table_code,
             ),
         ).fetchone()
 
         # Update KOTs with invoice_no and status
         conn.execute(
-            "UPDATE kot_mod.kots SET status = 'SETTLED', pos_invoice_no = %s WHERE outlet_code = %s AND table_code = %s AND status IN ('ACTIVE', 'READY', 'SERVED')",
-            (inv_no, payload.outlet_code, payload.table_code),
+            "UPDATE kot_mod.kots SET status = 'SETTLED', pos_invoice_no = %s WHERE outlet_code = %s AND table_code = %s AND status IN ('ACTIVE', 'READY', 'SERVED', 'COOKING', 'QUEUED')",
+            (inv_no, outlet_code, table_code),
         )
 
         # Release table
         conn.execute(
             "UPDATE kot_mod.dining_tables SET status = 'Available', current_pax = 0 WHERE outlet_code = %s AND table_code = %s",
-            (payload.outlet_code, payload.table_code),
+            (outlet_code, table_code),
+        )
+
+        # Close any pending sweet estimates linked to this table in pos_mod.pos_orders
+        conn.execute(
+            """
+            UPDATE pos_mod.pos_orders
+            SET status = 'DELIVERED_CLOSED',
+                invoice_no = COALESCE(invoice_no, %s),
+                paid_at = NOW(),
+                cashier_id = %s,
+                payment_splits = %s::jsonb
+            WHERE outlet_code = %s AND linked_table = %s AND status = 'ESTIMATE_GENERATED'
+            """,
+            (
+                f"INV-SWT-{table_code}-{cnt:04d}",
+                payload.cashier_id,
+                json.dumps([{"mode": payload.payment_mode, "amount": grand_total, "ref": payload.payment_ref or f"REST-BILL-{table_code}"}]),
+                outlet_code,
+                table_code,
+            ),
         )
 
         # Deduct kitchen recipe ingredients
         for it in aggregated_items:
             bom = conn.execute("SELECT * FROM admin_mod.boms WHERE fg_sku = %s", (it["sku"],)).fetchone()
             if bom:
-                for line in bom["lines"]:
-                    req_qty = float(line["qty"]) * it["qty"]
-                    conn.execute(
-                        """
-                        UPDATE stores_mod.stock_levels
-                        SET current_stock = GREATEST(0, current_stock - %s)
-                        WHERE outlet_code = %s AND item_sku = %s
-                        """,
-                        (req_qty, payload.outlet_code, line["rm_sku"]),
-                    )
+                ingredients = bom.get("ingredients") or bom.get("lines") or []
+                if isinstance(ingredients, str):
+                    try:
+                        ingredients = json.loads(ingredients)
+                    except Exception:
+                        ingredients = []
+                for line in ingredients:
+                    if isinstance(line, dict) and "rm_sku" in line and "qty" in line:
+                        req_qty = float(line["qty"]) * float(it["qty"])
+                        conn.execute(
+                            """
+                            UPDATE stores_mod.stock_levels
+                            SET current_stock = GREATEST(0, current_stock - %s)
+                            WHERE outlet_code = %s AND item_sku = %s
+                            """,
+                            (req_qty, outlet_code, line["rm_sku"]),
+                        )
+
+        # Standard Dynamic UPI QR URI
+        upi_string = f"upi://pay?pa=bikanervala.retail@icici&pn=Bikanervala%20Foods%20Pvt%20Ltd&am={grand_total:.2f}&cu=INR&tn=Invoice%20{inv_no}"
 
         return {
+            "success": True,
             "invoice_no": inv_no,
+            "estimate_no": est_no,
+            "order": order,
             "order_id": order["id"],
+            "subtotal": round(subtotal, 2),
+            "cgst": cgst,
+            "sgst": sgst,
             "grand_total": grand_total,
-            "table_code": payload.table_code,
+            "table_code": table_code,
             "settled_kots_count": len(kots),
+            "items": aggregated_items,
+            "payment_mode": payload.payment_mode,
+            "payment_ref": payload.payment_ref,
+            "upi_string": upi_string,
         }
 
 
@@ -479,6 +574,41 @@ def place_table_order(payload: TableOrderPayload):
             order_notes=payload.order_notes,
         )
 
+        # Check if any items belong to Sweet Counter (e.g., Jalebi, Rasgulla, Mithai)
+        sweet_items = []
+        for it in enriched:
+            st = (it.get("station") or "").lower()
+            cat = (it.get("category") or "").lower()
+            sku = (it.get("sku") or "").upper()
+            if "sweet" in st or "mithai" in st or "sweet" in cat or "mithai" in cat or sku.startswith("FG-RAS") or sku.startswith("FG-KAJU") or sku.startswith("FG-BESAN") or sku.startswith("FG-GULAB") or sku.startswith("FG-MOTI") or sku.startswith("FG-JAL"):
+                it["station"] = "Sweet Counter"
+                sweet_items.append(it)
+
+        sweet_estimate_no = None
+        if sweet_items:
+            est_cnt = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.pos_orders WHERE estimate_no IS NOT NULL").fetchone()["c"] + 45
+            sweet_estimate_no = f"EST-{payload.outlet_code.upper()}-{est_cnt:04d}"
+            sweet_subtotal = sum(float(i["unit_price"]) * float(i["qty"]) for i in sweet_items)
+            sweet_cgst = round(sweet_subtotal * 0.025, 2)
+            sweet_sgst = round(sweet_subtotal * 0.025, 2)
+            sweet_grand = round(sweet_subtotal + sweet_cgst + sweet_sgst, 2)
+
+            conn.execute(
+                """
+                INSERT INTO pos_mod.pos_orders
+                (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, payment_splits, cashier_id, customer_name, customer_mobile, linked_table)
+                VALUES (%s,%s,'3_COUNTER','ESTIMATE_GENERATED',%s::jsonb,%s,0,'sweet-hash',%s,%s,%s,'[]'::jsonb,%s,%s,%s,%s)
+                """,
+                (
+                    sweet_estimate_no, payload.outlet_code.upper(), json.dumps(sweet_items),
+                    round(sweet_subtotal, 2), sweet_cgst, sweet_sgst, sweet_grand,
+                    f"Order Boy - {payload.captain_name}",
+                    payload.guest_name or f"Table {payload.table_code} Guest",
+                    payload.guest_phone or "",
+                    payload.table_code.upper(),
+                ),
+            )
+
         return {
             "success": True,
             "kot": kot,
@@ -487,7 +617,8 @@ def place_table_order(payload: TableOrderPayload):
             "table_code": payload.table_code,
             "total_amount": round(total, 2),
             "items_count": len(enriched),
-            "message": f"KOT {kot_no} fired for Table {payload.table_code} by {payload.captain_name}",
+            "sweet_estimate_no": sweet_estimate_no,
+            "message": f"KOT {kot_no} fired for Table {payload.table_code} by {payload.captain_name}" + (f" (Sweet Counter Estimate {sweet_estimate_no} issued to Order Boy)" if sweet_estimate_no else ""),
         }
 
 

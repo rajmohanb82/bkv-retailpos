@@ -1,5 +1,6 @@
 import { apiFetch } from "../api";
 import { generateBarcodeSvgHtml } from "../components/BarcodeSvg";
+import QRCode from "qrcode";
 
 export const FAMOUS_PRINTER_DRIVERS = [
   "Epson TM-T82III (ESC/POS 58mm)",
@@ -242,11 +243,26 @@ export async function print40ColumnThermalSlip(
 
   // 2. Render crisp 40-column 58mm print receipt in hidden iframe and print
   try {
+    const isProforma = order.status === "PROFORMA" || order.mode === "PROFORMA_BILL";
     const isPaid =
-      order.status === "PAID_PENDING_DELIVERY" || order.status === "DELIVERED_CLOSED";
-    const docId = isPaid ? order.invoice_no : order.estimate_no;
+      !isProforma && (order.status === "PAID_PENDING_DELIVERY" || order.status === "DELIVERED_CLOSED" || order.status === "PAID");
+    const docId = isPaid ? order.invoice_no : (order.estimate_no || order.proforma_no || `CHK-${order.table_code || 'BILL'}`);
     const last4 = String(docId || "").slice(-4);
     const barcodeSvgHtml = generateBarcodeSvgHtml(docId, 48, true);
+
+    const totalAmt = Number(order.grand_total || 0);
+    const upiUri = `upi://pay?pa=bikanervala.retail@icici&pn=Bikanervala%20Foods%20Pvt%20Ltd&am=${totalAmt.toFixed(2)}&cu=INR&tn=Invoice%20${encodeURIComponent(docId || "BILL")}`;
+    let upiQrSvgHtml = "";
+    try {
+      upiQrSvgHtml = await QRCode.toString(upiUri, {
+        type: "svg",
+        width: 105,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff" },
+      });
+    } catch {
+      upiQrSvgHtml = "";
+    }
     const itemsHtml = (order.items || [])
       .map(
         (it: any) => `
@@ -294,14 +310,16 @@ export async function print40ColumnThermalSlip(
   ${
     isPaid
       ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;background:#000;color:#fff;padding:2px 8px;display:inline-block;font-size:11px;">TAX INVOICE</div>`
+      : isProforma
+      ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** PROFORMA INVOICE / TABLE CHECK ***</div>`
       : `<div class="center bold" style="margin:4px auto;border:1.5px dashed #000;padding:2px 6px;display:inline-block;font-size:10.5px;">*** ESTIMATE SLIP - NOT A BILL ***</div>`
   }
   <div class="line"></div>
-  <div class="row"><span>${isPaid ? "INV" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code || "DEL01"}</span></div>
-  <div class="row"><span>Token Last-4: <b>#${last4}</b></span><span>${new Date().toLocaleTimeString("en-IN")}</span></div>
+  <div class="row"><span>${isPaid ? "INV" : isProforma ? "PROFORMA" : "EST"}: <b>${docId}</b></span><span>Out: ${order.outlet_code || "DEL01"}</span></div>
+  ${order.table_code ? `<div class="row"><span>Dining Table: <b>${order.table_code}</b></span><span>Token: <b>#${last4}</b></span></div>` : `<div class="row"><span>Token Last-4: <b>#${last4}</b></span><span>${new Date().toLocaleTimeString("en-IN")}</span></div>`}
   ${
     order.customer_name || order.customer_mobile
-      ? `<div class="row"><span>Customer:</span><span><b>${order.customer_name || "Walk-in"}</b></span></div>
+      ? `<div class="row"><span>Customer:</span><span><b>${order.customer_name || "Guest"}</b></span></div>
          ${order.customer_mobile ? `<div class="row"><span>Mobile:</span><span><b>${order.customer_mobile}</b></span></div>` : ""}`
       : ""
   }
@@ -323,18 +341,34 @@ export async function print40ColumnThermalSlip(
       ? `<div class="row"><span>Disc (${order.discount_category || "PROMO"})</span><span>-Rs.${Number(order.discount_amount).toFixed(2)}</span></div>`
       : ""
   }
-  <div class="row"><span>CGST + SGST</span><span>Rs.${(Number(order.cgst || 0) + Number(order.sgst || 0)).toFixed(2)}</span></div>
+  <div class="row"><span>CGST + SGST (5%)</span><span>Rs.${(Number(order.cgst || 0) + Number(order.sgst || 0)).toFixed(2)}</span></div>
   <div class="line"></div>
   <div class="row bold" style="font-size:13px;"><span>GRAND TOTAL</span><span>Rs.${Number(order.grand_total || 0).toFixed(2)}</span></div>
   ${isPaid && splitsHtml ? `<div class="line"></div><div class="bold" style="font-size:10px;">TENDER SPLITS:</div>${splitsHtml}` : ""}
   
+  <!-- DYNAMIC UPI QR CODE -->
+  ${
+    upiQrSvgHtml
+      ? `
+  <div class="line"></div>
+  <div class="center" style="margin:5px 0 3px 0;">
+    <div class="bold" style="font-size:10px;letter-spacing:0.5px;margin-bottom:2px;">SCAN & PAY VIA UPI</div>
+    <div style="display:flex;justify-content:center;margin:3px auto;">
+      ${upiQrSvgHtml}
+    </div>
+    <div style="font-size:8.5px;color:#000;font-weight:700;margin-top:2px;">GPay • PhonePe • Paytm • BHIM UPI</div>
+    <div style="font-size:8px;color:#444;">UPI ID: bikanervala.retail@icici</div>
+  </div>`
+      : ""
+  }
+
   <!-- CRISP SCANNABLE BARCODE -->
   <div class="line"></div>
   <div class="center" style="margin:6px 0 2px 0;">
     ${barcodeSvgHtml}
   </div>
   <div class="center bold" style="font-size:9.5px;margin-top:2px;">
-    ${isPaid ? "Scan Barcode at Delivery Counter for Handover" : "Present Barcode at Cash Counter for Billing & Payment"}
+    ${isPaid ? "Thank you! Handover & Bill Settle Confirmed" : isProforma ? "Scan UPI QR Code to Pay Bill from Table" : "Present Barcode at Cash Counter for Billing & Payment"}
   </div>
 
   <!-- FOOTER -->

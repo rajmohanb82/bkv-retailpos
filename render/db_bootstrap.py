@@ -79,6 +79,9 @@ def apply_schema_migrations(cur):
 
         # 6. kot_mod.dining_tables (Restaurant floor alignment)
         ("kot_mod.dining_tables", "floor_name", "ALTER TABLE kot_mod.dining_tables ADD COLUMN IF NOT EXISTS floor_name VARCHAR(60) DEFAULT 'Ground Floor';"),
+
+        # 7. pos_mod.pos_orders (Linked restaurant table)
+        ("pos_mod.pos_orders", "linked_table", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS linked_table VARCHAR(32);"),
     ]
 
     print("[Render DB Bootstrap] Applying idempotent schema migrations...")
@@ -155,6 +158,7 @@ def apply_schema_migrations(cur):
                 legal_name = 'Bikanervala Foods Pvt. Ltd.',
                 gstin = '07AAACB1234F1Z5',
                 fssai_no = '13324001000451',
+                outlet_type = 'Restaurant + Sweet Shop',
                 address = 'Block B-14, Inner Circle, Connaught Place'
             WHERE code = 'DEL01';
 
@@ -182,6 +186,69 @@ def apply_schema_migrations(cur):
         print("[Render DB Bootstrap] Outlets updated with Bikanervala brand info, GSTIN, and FSSAI.")
     except Exception as e:
         print(f"[Render DB Bootstrap] Outlets update warning: {e}")
+
+    # Ensure oms_mod.aggregator_orders table exists
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS oms_mod.aggregator_orders (
+                id SERIAL PRIMARY KEY,
+                platform VARCHAR(30) NOT NULL,
+                aggregator_order_id VARCHAR(60) UNIQUE NOT NULL,
+                display_order_no VARCHAR(40) NOT NULL,
+                outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+                customer_name VARCHAR(100) NOT NULL,
+                customer_mobile VARCHAR(20) NOT NULL,
+                delivery_address TEXT,
+                items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                item_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+                taxes NUMERIC(10,2) NOT NULL DEFAULT 0,
+                delivery_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+                packing_charge NUMERIC(10,2) NOT NULL DEFAULT 0,
+                grand_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+                status VARCHAR(30) NOT NULL DEFAULT 'PLACED',
+                prep_time_mins INT DEFAULT 20,
+                decline_reason VARCHAR(100),
+                decline_comment TEXT,
+                rider_name VARCHAR(80),
+                rider_mobile VARCHAR(20),
+                otp_code VARCHAR(10),
+                placed_at TIMESTAMPTZ DEFAULT NOW(),
+                accepted_at TIMESTAMPTZ,
+                ready_at TIMESTAMPTZ,
+                picked_up_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            INSERT INTO oms_mod.aggregator_orders 
+            (platform, aggregator_order_id, display_order_no, outlet_code, customer_name, customer_mobile, delivery_address, items, item_total, taxes, delivery_fee, packing_charge, grand_total, status, prep_time_mins, rider_name, rider_mobile, otp_code)
+            VALUES
+            ('ZOMATO', 'ZOM-8841-LIVE', 'ZOM#8841', 'DEL01', 'Rohit Malhotra', '+91-9811223344', 'Flat 402, Barakhamba Road, Connaught Place', '[{"sku":"RST-CHAAT-01","name":"Annavya Special Raj Kachori","qty":2,"price":185},{"sku":"FG-KAJU-01","name":"Royal Silver-Leaf Kaju Katli (500g)","qty":1,"price":590}]'::jsonb, 960.00, 48.00, 35.00, 20.00, 1063.00, 'PLACED', 20, 'Vikas Kumar', '+91-9871002233', '4812'),
+            ('SWIGGY', 'SWG-4412-LIVE', 'SWG#4412', 'DEL01', 'Ananya Gupta', '+91-9877112233', 'Suite 12, Janpath, New Delhi', '[{"sku":"RST-TAND-01","name":"Paneer Lababdar + 2 Butter Naan","qty":1,"price":395},{"sku":"FG-RAS-01","name":"Spongy White Rasgulla (1kg)","qty":1,"price":480}]'::jsonb, 875.00, 43.75, 40.00, 25.00, 983.75, 'PLACED', 15, 'Suresh Rawat', '+91-9911445566', '7129')
+            ON CONFLICT (aggregator_order_id) DO NOTHING;
+        """)
+        print("[Render DB Bootstrap] oms_mod.aggregator_orders table and initial seed verified.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Aggregator orders migration warning: {e}")
+
+    # Ensure DEL01 Dining Tables exist
+    try:
+        cur.execute("""
+            INSERT INTO kot_mod.dining_tables (outlet_code, table_code, section, capacity, status, current_pax, floor_name) VALUES
+            ('DEL01', 'T-01', 'Main Dining Hall', 4, 'Available', 0, 'Ground Floor'),
+            ('DEL01', 'T-02', 'Main Dining Hall', 4, 'Available', 0, 'Ground Floor'),
+            ('DEL01', 'T-03', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+            ('DEL01', 'T-04', 'Window Section', 6, 'Available', 0, 'Ground Floor'),
+            ('DEL01', 'T-05', 'Family Lounge', 8, 'Available', 0, 'Ground Floor'),
+            ('DEL01', 'T-11', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+            ('DEL01', 'T-12', 'Executive Dining', 4, 'Available', 0, 'First Floor'),
+            ('DEL01', 'T-13', 'Family Banquet Section', 10, 'Available', 0, 'First Floor'),
+            ('DEL01', 'T-21', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden'),
+            ('DEL01', 'T-22', 'Terrace Open Sky', 4, 'Available', 0, 'Terrace Garden')
+            ON CONFLICT DO NOTHING;
+        """)
+        print("[Render DB Bootstrap] Ensured DEL01 restaurant dining tables exist.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] DEL01 dining tables warning: {e}")
 
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
 

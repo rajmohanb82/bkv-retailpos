@@ -1,6 +1,7 @@
 import React from "react";
 import { Printer, Copy, Check } from "lucide-react";
 import { BarcodeSvg } from "./BarcodeSvg";
+import { UpiQrCode } from "./UpiQrCode";
 import { Outlet } from "../types";
 import { print40ColumnThermalSlip } from "../utils/posHardware";
 
@@ -168,13 +169,24 @@ export const ThermalSlip: React.FC<ThermalSlipProps> = ({ order, outlet }) => {
           </div>
         )}
 
-        <div className="mt-3 pt-2 border-t border-dashed border-slate-400">
+        {/* Dynamic UPI QR Code */}
+        <div className="mt-3 pt-2 border-t border-dashed border-slate-400 flex flex-col items-center">
+          <div className="text-[10px] font-bold text-slate-800 mb-1">SCAN & PAY VIA UPI</div>
+          <UpiQrCode
+            amount={Number(order.grand_total || 0)}
+            docId={barcode}
+            size={105}
+            className="!p-1 !bg-transparent !border-0 !shadow-none"
+          />
+        </div>
+
+        <div className="mt-2 pt-1 border-t border-dashed border-slate-400">
           <BarcodeSvg value={barcode} height={46} showText={true} />
         </div>
         <div className="text-center text-[9px] font-semibold text-slate-700 mt-1">
           {isPaid
             ? "Scan Barcode at Delivery Counter for Handover"
-            : "Valid Today Only • Present Barcode at Cash Counter to Pay"}
+            : "Valid Today Only • Scan UPI to Pay from Table or Present at Cash Counter"}
         </div>
         <div className="border-t border-dotted border-slate-300 mt-3 pt-2 text-center text-[8.5px] text-slate-500 space-y-0.5">
           <div className="font-bold text-slate-700">Taste of Tradition • Fresh Thinking</div>

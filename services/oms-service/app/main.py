@@ -13,6 +13,44 @@ def get_next_prod_num(conn):
 app = create_service_app("Order Management System (OMS) Service")
 
 
+@app.on_event("startup")
+def ensure_oms_tables():
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS oms_mod.aggregator_orders (
+                    id SERIAL PRIMARY KEY,
+                    platform VARCHAR(30) NOT NULL,
+                    aggregator_order_id VARCHAR(60) UNIQUE NOT NULL,
+                    display_order_no VARCHAR(40) NOT NULL,
+                    outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+                    customer_name VARCHAR(100) NOT NULL,
+                    customer_mobile VARCHAR(20) NOT NULL,
+                    delivery_address TEXT,
+                    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    item_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+                    taxes NUMERIC(10,2) NOT NULL DEFAULT 0,
+                    delivery_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+                    packing_charge NUMERIC(10,2) NOT NULL DEFAULT 0,
+                    grand_total NUMERIC(10,2) NOT NULL DEFAULT 0,
+                    status VARCHAR(30) NOT NULL DEFAULT 'PLACED',
+                    prep_time_mins INT DEFAULT 20,
+                    decline_reason VARCHAR(100),
+                    decline_comment TEXT,
+                    rider_name VARCHAR(80),
+                    rider_mobile VARCHAR(20),
+                    otp_code VARCHAR(10),
+                    placed_at TIMESTAMPTZ DEFAULT NOW(),
+                    accepted_at TIMESTAMPTZ,
+                    ready_at TIMESTAMPTZ,
+                    picked_up_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+    except Exception as e:
+        print(f"[OMS Service] Warning on ensure_oms_tables: {e}")
+
+
 class OmsOrderCreate(BaseModel):
     order_type: str = "Corporate Gifting"
     customer_name: str
@@ -530,21 +568,25 @@ class AggregatorSimulatePayload(BaseModel):
 
 @app.get("/aggregators/orders")
 def list_aggregator_orders(platform: str | None = None, status: str | None = None, outlet_code: str | None = None):
-    with get_conn() as conn:
-        q = "SELECT * FROM oms_mod.aggregator_orders WHERE 1=1"
-        params = []
-        if platform and platform.upper() != "ALL":
-            q += " AND platform = %s"
-            params.append(platform.upper())
-        if status and status.upper() != "ALL":
-            q += " AND status = %s"
-            params.append(status.upper())
-        if outlet_code and outlet_code.upper() != "ALL":
-            q += " AND outlet_code = %s"
-            params.append(outlet_code)
-        q += " ORDER BY id DESC"
-        orders = conn.execute(q, tuple(params)).fetchall()
-        return orders
+    try:
+        with get_conn() as conn:
+            q = "SELECT * FROM oms_mod.aggregator_orders WHERE 1=1"
+            params = []
+            if platform and platform.upper() != "ALL":
+                q += " AND platform = %s"
+                params.append(platform.upper())
+            if status and status.upper() != "ALL":
+                q += " AND status = %s"
+                params.append(status.upper())
+            if outlet_code and outlet_code.upper() != "ALL":
+                q += " AND outlet_code = %s"
+                params.append(outlet_code)
+            q += " ORDER BY id DESC"
+            orders = conn.execute(q, tuple(params)).fetchall()
+            return orders
+    except Exception as e:
+        print(f"[OMS Service] Warning list_aggregator_orders: {e}")
+        return []
 
 
 @app.post("/aggregators/zomato/webhook")
