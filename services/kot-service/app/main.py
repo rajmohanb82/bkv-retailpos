@@ -8,6 +8,25 @@ from common.db import get_conn
 app = create_service_app("KOT & Restaurant Kitchen Service")
 
 
+@app.on_event("startup")
+def ensure_kot_schema():
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                ALTER TABLE kot_mod.dining_tables ADD COLUMN IF NOT EXISTS floor_name VARCHAR(60) DEFAULT 'Ground Floor';
+                ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS pos_invoice_no VARCHAR(40);
+                ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+                ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS void_reason TEXT;
+                ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS order_source VARCHAR(20) DEFAULT 'DINE_IN';
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS linked_table VARCHAR(32);
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(120);
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_mobile VARCHAR(20);
+            """)
+    except Exception as e:
+        print(f"[KOT Service] Warning on ensure_kot_schema: {e}")
+
+
+
 class KotCreate(BaseModel):
     outlet_code: str = "GUR02"
     table_code: str = "T-02"

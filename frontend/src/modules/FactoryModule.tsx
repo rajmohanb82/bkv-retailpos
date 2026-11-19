@@ -74,15 +74,25 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
     setLoading(true);
     try {
       const [inboxRes, ordsRes, kettlesRes] = await Promise.all([
-        apiFetch<any>(`/api/factory/inbox?factory_code=${factoryCode}`).catch(() => ({ inbox_orders: [], pending_indents: [], active_requisitions: [] })),
-        apiFetch<any[]>(`/api/factory/orders?factory_code=${factoryCode}`).catch(() => []),
-        apiFetch<KettleStatus[]>("/api/factory/kettles").catch(() => []),
+        apiFetch<any>(`/api/factory/inbox?factory_code=${factoryCode}`).catch((err) => {
+          console.warn("Factory inbox load warning:", err);
+          return { inbox_orders: [], pending_indents: [], active_requisitions: [] };
+        }),
+        apiFetch<any[]>(`/api/factory/orders?factory_code=${factoryCode}`).catch((err) => {
+          console.warn("Factory orders load warning:", err);
+          return [];
+        }),
+        apiFetch<KettleStatus[]>("/api/factory/kettles").catch((err) => {
+          console.warn("Factory kettles load warning:", err);
+          return [];
+        }),
       ]);
-      setInboxData(inboxRes);
-      setOrders(ordsRes);
-      setKettles(kettlesRes);
+      setInboxData(inboxRes || { inbox_orders: [], pending_indents: [], active_requisitions: [] });
+      setOrders(ordsRes || []);
+      setKettles(kettlesRes || []);
     } catch (e: any) {
       console.error("Factory load error:", e);
+      notify(false, e.message || "Failed to load factory data");
     } finally {
       setLoading(false);
     }
@@ -453,7 +463,7 @@ export const FactoryModule: React.FC<FactoryModuleProps> = ({ initialTab = "inbo
             ) : (
               inboxOrders.map((order: any) => {
                 const isAccepted = order.status !== "INBOX" && order.status !== "Planned";
-                const isStoreIssued = order.status === "STORE_ISSUED" || order.store_status === "ISSUED";
+                const isStoreIssued = order.status === "STORE_ISSUED" || order.status === "MaterialIssued" || order.store_status === "ISSUED";
                 const isProcessing = actionProcessing === order.id;
 
                 return (

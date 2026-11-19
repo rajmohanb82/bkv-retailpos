@@ -8,6 +8,34 @@ from common.db import get_conn
 app = create_service_app("Stores & Multi-Store Inventory Service")
 
 
+@app.on_event("startup")
+def ensure_stores_schema():
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS stores_mod.material_requisitions (
+                    id SERIAL PRIMARY KEY,
+                    req_no VARCHAR(40) UNIQUE NOT NULL,
+                    prod_no VARCHAR(40) NOT NULL,
+                    factory_code VARCHAR(30) NOT NULL DEFAULT 'FAC-DEL01',
+                    fg_sku VARCHAR(40) NOT NULL,
+                    fg_name VARCHAR(140) NOT NULL,
+                    planned_qty NUMERIC(10,2) NOT NULL,
+                    uom VARCHAR(20) NOT NULL DEFAULT 'kg',
+                    store_code VARCHAR(30) NOT NULL DEFAULT 'STR-MFG-RM',
+                    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ISSUE',
+                    bom_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    issued_batches JSONB DEFAULT '[]'::jsonb,
+                    requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
+                    issued_by VARCHAR(80),
+                    issued_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+    except Exception as e:
+        print(f"[Stores Service] Warning on ensure_stores_schema: {e}")
+
+
 class StoreCreate(BaseModel):
     store_code: str
     name: str
@@ -328,12 +356,16 @@ def issue_bom_to_production(payload: BomIssueRequest):
                 issued_lines.append({"rm_sku": ing["rm_sku"], "batch_no": b["batch_no"], "qty": round(take, 3), "uom": ing["uom"], "expiry_date": str(b["expiry_date"])})
                 remaining = round(remaining - take, 3)
 
-        # Update Production Order status -> MaterialIssued
+        # Update Production Order status -> STORE_ISSUED & store_status -> ISSUED
         conn.execute(
-            "UPDATE factory_mod.production_orders SET status = 'MaterialIssued', actual_rm_cost = %s WHERE prod_no = %s",
+            """
+            UPDATE factory_mod.production_orders 
+            SET status = 'STORE_ISSUED', store_status = 'ISSUED', progress_pct = 50, actual_rm_cost = %s 
+            WHERE prod_no = %s
+            """,
             (round(total_rm_cost, 2), payload.prod_no),
         )
-        return {"prod_no": payload.prod_no, "status": "MaterialIssued", "total_rm_cost": round(total_rm_cost, 2), "issued_lines": issued_lines}
+        return {"prod_no": payload.prod_no, "status": "STORE_ISSUED", "store_status": "ISSUED", "total_rm_cost": round(total_rm_cost, 2), "issued_lines": issued_lines}
 
 
 @app.post("/mrn")

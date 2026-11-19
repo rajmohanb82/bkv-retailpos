@@ -9,6 +9,43 @@ from common.db import get_conn
 app = create_service_app("Sweet Production Factory Service")
 
 
+@app.on_event("startup")
+def ensure_factory_schema():
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS stores_mod.material_requisitions (
+                    id SERIAL PRIMARY KEY,
+                    req_no VARCHAR(40) UNIQUE NOT NULL,
+                    prod_no VARCHAR(40) NOT NULL,
+                    factory_code VARCHAR(30) NOT NULL DEFAULT 'FAC-DEL01',
+                    fg_sku VARCHAR(40) NOT NULL,
+                    fg_name VARCHAR(140) NOT NULL,
+                    planned_qty NUMERIC(10,2) NOT NULL,
+                    uom VARCHAR(20) NOT NULL DEFAULT 'kg',
+                    store_code VARCHAR(30) NOT NULL DEFAULT 'STR-MFG-RM',
+                    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ISSUE',
+                    bom_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    issued_batches JSONB DEFAULT '[]'::jsonb,
+                    requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
+                    issued_by VARCHAR(80),
+                    issued_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+                ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS factory_code VARCHAR(30) DEFAULT 'FAC-DEL01';
+                ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS target_outlet_code VARCHAR(30) DEFAULT 'DEL01';
+                ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS req_no VARCHAR(40);
+                ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS store_status VARCHAR(40) DEFAULT 'NOT_REQUESTED';
+                ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS progress_pct INTEGER DEFAULT 10;
+                UPDATE factory_mod.production_orders SET factory_code = 'FAC-DEL01' WHERE factory_code IS NULL;
+                UPDATE factory_mod.production_orders SET target_outlet_code = 'DEL01' WHERE target_outlet_code IS NULL;
+                UPDATE factory_mod.production_orders SET store_status = 'NOT_REQUESTED' WHERE store_status IS NULL;
+                UPDATE factory_mod.production_orders SET progress_pct = 10 WHERE progress_pct IS NULL;
+            """)
+    except Exception as e:
+        print(f"[Factory Service] Warning on ensure_factory_schema: {e}")
+
+
 class ProdOrderCreate(BaseModel):
     fg_sku: str
     planned_qty: float
@@ -46,7 +83,7 @@ def list_production_orders(factory_code: Optional[str] = Query(None)):
         query = "SELECT * FROM factory_mod.production_orders"
         params = []
         if factory_code and factory_code != "all":
-            query += " WHERE factory_code = %s"
+            query += " WHERE (factory_code = %s OR factory_code IS NULL)"
             params.append(factory_code)
         query += " ORDER BY id DESC"
         
@@ -72,13 +109,13 @@ def get_factory_inbox(factory_code: Optional[str] = Query(None)):
         fcode = factory_code or "FAC-DEL01"
         order_query = """
             SELECT * FROM factory_mod.production_orders
-            WHERE status IN ('INBOX', 'Planned', 'ACCEPTED', 'MaterialRequested', 'STORE_ISSUED')
+            WHERE status IN ('INBOX', 'Planned', 'ACCEPTED', 'MaterialRequested', 'STORE_ISSUED', 'MaterialIssued')
         """
         params = []
         if factory_code and factory_code != "all":
-            order_query += " AND factory_code = %s"
+            order_query += " AND (factory_code = %s OR factory_code IS NULL)"
             params.append(fcode)
-        order_query += " ORDER BY id DESC"
+        order_query += " ORDER BY id DESC LIMIT 100"
         inbox_orders = conn.execute(order_query, tuple(params)).fetchall()
 
         # 2. Outlet indents waiting to be accepted into production
@@ -90,8 +127,8 @@ def get_factory_inbox(factory_code: Optional[str] = Query(None)):
             FROM pos_mod.outlet_indents i
             LEFT JOIN admin_mod.items it ON i.sku = it.sku
             LEFT JOIN admin_mod.boms b ON i.sku = b.fg_sku
-            WHERE i.status IN ('REQUESTED', 'APPROVED')
-            ORDER BY i.id DESC
+            WHERE i.status IN ('REQUESTED', 'APPROVED', 'PLANNED')
+            ORDER BY i.id DESC LIMIT 50
             """
         ).fetchall()
 
@@ -99,9 +136,9 @@ def get_factory_inbox(factory_code: Optional[str] = Query(None)):
         req_query = "SELECT * FROM stores_mod.material_requisitions"
         req_params = []
         if factory_code and factory_code != "all":
-            req_query += " WHERE factory_code = %s"
+            req_query += " WHERE (factory_code = %s OR factory_code IS NULL)"
             req_params.append(fcode)
-        req_query += " ORDER BY id DESC LIMIT 15"
+        req_query += " ORDER BY id DESC LIMIT 50"
         requisitions = conn.execute(req_query, tuple(req_params)).fetchall()
 
         return {

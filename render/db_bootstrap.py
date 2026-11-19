@@ -84,6 +84,19 @@ def apply_schema_migrations(cur):
 
         # 7. pos_mod.pos_orders (Linked restaurant table)
         ("pos_mod.pos_orders", "linked_table", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS linked_table VARCHAR(32);"),
+
+        # 8. factory_mod.production_orders (Factory alignment, multi-plant, store tracking)
+        ("factory_mod.production_orders", "factory_code", "ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS factory_code VARCHAR(30) DEFAULT 'FAC-DEL01';"),
+        ("factory_mod.production_orders", "target_outlet_code", "ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS target_outlet_code VARCHAR(30) DEFAULT 'DEL01';"),
+        ("factory_mod.production_orders", "req_no", "ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS req_no VARCHAR(40);"),
+        ("factory_mod.production_orders", "store_status", "ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS store_status VARCHAR(40) DEFAULT 'NOT_REQUESTED';"),
+        ("factory_mod.production_orders", "progress_pct", "ALTER TABLE factory_mod.production_orders ADD COLUMN IF NOT EXISTS progress_pct INTEGER DEFAULT 10;"),
+
+        # 9. kot_mod.kots (Invoice linkage, totals, void audit)
+        ("kot_mod.kots", "pos_invoice_no", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS pos_invoice_no VARCHAR(40);"),
+        ("kot_mod.kots", "total_amount", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12,2) NOT NULL DEFAULT 0;"),
+        ("kot_mod.kots", "void_reason", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS void_reason TEXT;"),
+        ("kot_mod.kots", "order_source", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS order_source VARCHAR(20) DEFAULT 'DINE_IN';"),
     ]
 
     print("[Render DB Bootstrap] Applying idempotent schema migrations...")
@@ -137,6 +150,36 @@ def apply_schema_migrations(cur):
         print("[Render DB Bootstrap] Enabled 'item_admin', 'order_taking', 'kiosk', 'walkie_talkie' in role permissions.")
     except Exception as e:
         print(f"[Render DB Bootstrap] Role permissions update warning: {e}")
+
+    # Ensure stores_mod.material_requisitions table exists and factory orders are backfilled
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stores_mod.material_requisitions (
+                id SERIAL PRIMARY KEY,
+                req_no VARCHAR(40) UNIQUE NOT NULL,
+                prod_no VARCHAR(40) NOT NULL,
+                factory_code VARCHAR(30) NOT NULL DEFAULT 'FAC-DEL01',
+                fg_sku VARCHAR(40) NOT NULL,
+                fg_name VARCHAR(140) NOT NULL,
+                planned_qty NUMERIC(10,2) NOT NULL,
+                uom VARCHAR(20) NOT NULL DEFAULT 'kg',
+                store_code VARCHAR(30) NOT NULL DEFAULT 'STR-MFG-RM',
+                status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ISSUE',
+                bom_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                issued_batches JSONB DEFAULT '[]'::jsonb,
+                requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
+                issued_by VARCHAR(80),
+                issued_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            UPDATE factory_mod.production_orders SET factory_code = 'FAC-DEL01' WHERE factory_code IS NULL;
+            UPDATE factory_mod.production_orders SET target_outlet_code = 'DEL01' WHERE target_outlet_code IS NULL;
+            UPDATE factory_mod.production_orders SET store_status = 'NOT_REQUESTED' WHERE store_status IS NULL;
+            UPDATE factory_mod.production_orders SET progress_pct = 10 WHERE progress_pct IS NULL;
+        """)
+        print("[Render DB Bootstrap] Verified stores_mod.material_requisitions & factory columns.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Material requisitions setup warning: {e}")
 
     # Ensure system_config has full default aggregator_config (Zomato & Swiggy)
     try:

@@ -283,6 +283,25 @@ CREATE TABLE stores_mod.purchase_requisitions (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE stores_mod.material_requisitions (
+    id SERIAL PRIMARY KEY,
+    req_no VARCHAR(40) UNIQUE NOT NULL,
+    prod_no VARCHAR(40) NOT NULL,
+    factory_code VARCHAR(30) NOT NULL DEFAULT 'FAC-DEL01',
+    fg_sku VARCHAR(40) NOT NULL,
+    fg_name VARCHAR(140) NOT NULL,
+    planned_qty NUMERIC(10,2) NOT NULL,
+    uom VARCHAR(20) NOT NULL DEFAULT 'kg',
+    store_code VARCHAR(30) NOT NULL DEFAULT 'STR-MFG-RM',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING_ISSUE',
+    bom_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    issued_batches JSONB DEFAULT '[]'::jsonb,
+    requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
+    issued_by VARCHAR(80),
+    issued_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ==========================================
 -- 5. SWEET PRODUCTION FACTORY MODULE (Module 5)
 -- ==========================================
@@ -297,7 +316,7 @@ CREATE TABLE factory_mod.production_orders (
     uom VARCHAR(20) NOT NULL DEFAULT 'kg',
     source_type VARCHAR(30) NOT NULL,
     source_ref VARCHAR(50),
-    kettle_line VARCHAR(40) DEFAULT 'Kettle Line A',
+    kettle_line VARCHAR(40) DEFAULT 'Steam Kettle #1',
     shift VARCHAR(20) DEFAULT 'Morning Shift',
     status VARCHAR(30) DEFAULT 'Planned',
     expected_rm_cost NUMERIC(12,2) DEFAULT 0,
@@ -308,6 +327,11 @@ CREATE TABLE factory_mod.production_orders (
     mfg_date DATE,
     expiry_date DATE,
     qc_data JSONB DEFAULT '{}'::jsonb,
+    factory_code VARCHAR(30) NOT NULL DEFAULT 'FAC-DEL01',
+    target_outlet_code VARCHAR(30) NOT NULL DEFAULT 'DEL01',
+    req_no VARCHAR(40),
+    store_status VARCHAR(40) NOT NULL DEFAULT 'NOT_REQUESTED',
+    progress_pct INTEGER NOT NULL DEFAULT 10,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -725,11 +749,16 @@ INSERT INTO stores_mod.purchase_requisitions (pr_no, store_code, sku, item_name,
 ('PR-2026-020', 'STR-MFG-RM', 'RM-PISTA-01', 'Iranian Roasted Pistachio', 40.0, 'kg', 'Below Dynamic ROP (14 kg vs 30 kg par)', 'OPEN');
 
 -- Factory Production Orders
-INSERT INTO factory_mod.production_orders (prod_no, fg_sku, fg_name, sweet_line, planned_qty, actual_qty, uom, source_type, source_ref, kettle_line, shift, status, expected_rm_cost, actual_rm_cost, labor_overhead, yield_variance_pct, batch_no, mfg_date, expiry_date, qc_data) VALUES
-('PRD-2026-091', 'FG-RAS-01', 'Spongy White Rasgulla', 'Milk Sweets', 100.0, 99.2, 'kg', 'Combined', 'IND-DEL01+GUR02', 'Steam Kettle #1', 'Morning Shift', 'DispatchedToStore', 33915.00, 34120.00, 2800.00, -0.80, 'FG-RAS-261112', CURRENT_DATE, CURRENT_DATE + 3, '{"brix_pct":52.4,"moisture_pct":41.0,"temp_c":6.2,"hygiene":"PASS","allergen":"Dairy"}'::jsonb),
-('PRD-2026-092', 'FG-RAS-01', 'Spongy White Rasgulla', 'Milk Sweets', 100.0, NULL, 'kg', 'Outlet Indent', 'IND-2026-014', 'Steam Kettle #2', 'Morning Shift', 'Planned', 33915.00, 0, 2800.00, 0, NULL, NULL, NULL, '{}'::jsonb),
-('PRD-2026-093', 'FG-KAJU-01', 'Royal Silver-Leaf Kaju Katli', 'Dry Fruit Sweets', 80.0, NULL, 'kg', 'OMS Bulk', 'OMS-2026-0011', 'Copper Karahi #3', 'Afternoon Shift', 'InProduction', 51360.00, 51360.00, 3600.00, 0, 'FG-KJU-261112', CURRENT_DATE, CURRENT_DATE + 15, '{}'::jsonb),
-('PRD-2026-094', 'FG-BESAN-01', 'Desi Ghee Besan Laddu', 'Ghee Sweets', 60.0, 57.1, 'kg', 'Outlet Indent', 'IND-2026-015', 'Roti Karahi #1', 'Morning Shift', 'QualityCheck', 17304.00, 17450.00, 2100.00, -4.83, 'FG-BSN-261112', CURRENT_DATE, CURRENT_DATE + 21, '{"aroma":"Rich Ghee","moisture_pct":4.8}'::jsonb);
+INSERT INTO factory_mod.production_orders (prod_no, fg_sku, fg_name, sweet_line, planned_qty, actual_qty, uom, source_type, source_ref, kettle_line, shift, status, expected_rm_cost, actual_rm_cost, labor_overhead, yield_variance_pct, batch_no, mfg_date, expiry_date, qc_data, factory_code, target_outlet_code, store_status, progress_pct) VALUES
+('PRD-2026-091', 'FG-RAS-01', 'Spongy White Rasgulla', 'Milk Sweets', 100.0, 99.2, 'kg', 'Combined', 'IND-DEL01+GUR02', 'Steam Kettle #1', 'Morning Shift', 'DispatchedToStore', 33915.00, 34120.00, 2800.00, -0.80, 'FG-RAS-261112', CURRENT_DATE, CURRENT_DATE + 3, '{"brix_pct":52.4,"moisture_pct":41.0,"temp_c":6.2,"hygiene":"PASS","allergen":"Dairy"}'::jsonb, 'FAC-DEL01', 'DEL01', 'ISSUED', 100),
+('PRD-2026-092', 'FG-RAS-01', 'Spongy White Rasgulla', 'Milk Sweets', 100.0, NULL, 'kg', 'Outlet Indent', 'IND-2026-014', 'Steam Kettle #2', 'Morning Shift', 'Planned', 33915.00, 0, 2800.00, 0, NULL, NULL, NULL, '{}'::jsonb, 'FAC-DEL01', 'DEL01', 'NOT_REQUESTED', 15),
+('PRD-2026-093', 'FG-KAJU-01', 'Royal Silver-Leaf Kaju Katli', 'Dry Fruit Sweets', 80.0, NULL, 'kg', 'OMS Bulk', 'OMS-2026-0011', 'Copper Karahi #3', 'Afternoon Shift', 'InProduction', 51360.00, 51360.00, 3600.00, 0, 'FG-KJU-261112', CURRENT_DATE, CURRENT_DATE + 15, '{}'::jsonb, 'FAC-DEL01', 'DEL01', 'ISSUED', 60),
+('PRD-2026-094', 'FG-BESAN-01', 'Desi Ghee Besan Laddu', 'Ghee Sweets', 60.0, 57.1, 'kg', 'Outlet Indent', 'IND-2026-015', 'Roti Karahi #1', 'Morning Shift', 'QualityCheck', 17304.00, 17450.00, 2100.00, -4.83, 'FG-BSN-261112', CURRENT_DATE, CURRENT_DATE + 21, '{"aroma":"Rich Ghee","moisture_pct":4.8}'::jsonb, 'FAC-DEL01', 'DEL01', 'ISSUED', 80);
+
+-- Initial Factory Material Requisitions
+INSERT INTO stores_mod.material_requisitions (req_no, prod_no, factory_code, fg_sku, fg_name, planned_qty, uom, store_code, status, bom_items, requested_by) VALUES
+('REQ-MAT-PRD-2026-092', 'PRD-2026-092', 'FAC-DEL01', 'FG-RAS-01', 'Spongy White Rasgulla', 100.0, 'kg', 'STR-MFG-RM', 'PENDING_ISSUE', '[{"rm_sku":"RM-MILK-01","rm_name":"Full Cream Cow Milk (A2 Raw)","required_qty":500.0,"uom":"Litre"},{"rm_sku":"RM-SUGAR-01","rm_name":"Pharma Grade Refined Sugar M-30","required_qty":80.0,"uom":"kg"}]'::jsonb, 'Production Manager')
+ON CONFLICT (req_no) DO NOTHING;
 
 INSERT INTO factory_mod.wip_stages (prod_no, stage_name, input_sku, input_qty, output_sku, output_qty, yield_pct, status) VALUES
 ('PRD-2026-091', 'Stage 1: Milk -> Chhena Curdling', 'RM-MILK-01', 500.0, 'WIP-CHHENA', 96.0, 19.20, 'COMPLETED'),

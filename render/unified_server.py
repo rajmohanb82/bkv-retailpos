@@ -39,6 +39,7 @@ SERVICES = [
 ]
 
 mounted_services = []
+loaded_modules = []
 
 for api_prefix, svc_folder in SERVICES:
     main_py = os.path.join(SERVICES_DIR, svc_folder, "app", "main.py")
@@ -55,11 +56,24 @@ for api_prefix, svc_folder in SERVICES:
             if hasattr(mod, "app"):
                 app.mount(f"/api/{api_prefix}", mod.app)
                 mounted_services.append(api_prefix)
+                loaded_modules.append((api_prefix, mod))
                 print(f"[Render Unified Server] Mounted /api/{api_prefix} -> {svc_folder} ({len(mod.app.routes)} routes)")
             else:
                 print(f"[Render Unified Server] ERROR: No 'app' found in {main_py}")
     except Exception as e:
         print(f"[Render Unified Server] Failed to load {svc_folder}: {e}")
+
+@app.on_event("startup")
+def run_service_startups():
+    for api_prefix, mod in loaded_modules:
+        for attr in dir(mod):
+            if attr.startswith("ensure_") and callable(getattr(mod, attr)):
+                try:
+                    getattr(mod, attr)()
+                    print(f"[Render Unified Server] Executed {api_prefix}.{attr}() successfully.")
+                except Exception as e:
+                    print(f"[Render Unified Server] Startup check warning on {api_prefix}.{attr}: {e}")
+
 
 # Health Check Endpoints
 @app.get("/health")
