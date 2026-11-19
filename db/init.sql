@@ -502,6 +502,7 @@ CREATE TABLE kot_mod.dining_tables (
     outlet_code VARCHAR(20) NOT NULL,
     table_code VARCHAR(20) NOT NULL,
     section VARCHAR(40) NOT NULL,
+    floor_name VARCHAR(60) DEFAULT 'Ground Floor',
     capacity INT NOT NULL DEFAULT 4,
     status VARCHAR(30) DEFAULT 'Available',
     current_pax INT DEFAULT 0,
@@ -798,7 +799,7 @@ INSERT INTO kot_mod.kots (kot_no, outlet_code, table_code, order_source, captain
   {"sku":"RST-CHAAT-01","name":"Annavya Special Raj Kachori","qty":2,"unit_price":185,"station":"Chaat","modifiers":"Extra Meethi Saunth, Less Curd","course":"Starter","station_status":"Ready"},
   {"sku":"RST-TAND-01","name":"Paneer Lababdar + 2 Butter Naan","qty":1,"unit_price":395,"station":"Tandoor","modifiers":"Jain Preparation","course":"Main","station_status":"Preparing"},
   {"sku":"FG-RAS-01","name":"Spongy White Rasgulla (2 pcs)","qty":2,"unit_price":120,"station":"Sweet Counter","modifiers":"Serve Chilled","course":"Dessert","station_status":"Ready"}
-]'::jsonb, 'ACTIVE', 885.00),
+]'::jsonb, 'ACTIVE', 885.00);
 
 INSERT INTO kot_mod.kots (kot_no, outlet_code, table_code, order_source, captain_name, items, status, total_amount) VALUES
 ('KOT-GUR02-105', 'GUR02', 'T-01', 'DINE_IN', 'Arjun Negi', '[
