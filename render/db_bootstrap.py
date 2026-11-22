@@ -103,6 +103,18 @@ def apply_schema_migrations(cur):
         ("pos_mod.pos_orders", "counter_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';"),
         ("pos_mod.pos_orders", "cashier_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';"),
         ("pos_mod.pos_orders", "terminal_ip", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';"),
+
+        # 11. stores_mod.material_requisitions (Stores Checkout Gate, Order Type, Customer Details & Barcode)
+        ("stores_mod.material_requisitions", "order_type", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS order_type VARCHAR(60) DEFAULT 'Factory BOM Requisition';"),
+        ("stores_mod.material_requisitions", "customer_name", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(120);"),
+        ("stores_mod.material_requisitions", "customer_mobile", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_mobile VARCHAR(30);"),
+        ("stores_mod.material_requisitions", "customer_company", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_company VARCHAR(140);"),
+        ("stores_mod.material_requisitions", "destination", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS destination VARCHAR(160);"),
+        ("stores_mod.material_requisitions", "accepted_by", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS accepted_by VARCHAR(80);"),
+        ("stores_mod.material_requisitions", "accepted_at", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;"),
+        ("stores_mod.material_requisitions", "checkout_by", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS checkout_by VARCHAR(80);"),
+        ("stores_mod.material_requisitions", "checkout_at", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS checkout_at TIMESTAMPTZ;"),
+        ("stores_mod.material_requisitions", "slip_barcode", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS slip_barcode VARCHAR(60);"),
     ]
 
     print("[Render DB Bootstrap] Applying idempotent schema migrations...")
@@ -335,6 +347,26 @@ def apply_schema_migrations(cur):
         print("[Render DB Bootstrap] Ensured pos_mod.cash_counters table and initial seed exist.")
     except Exception as e:
         print(f"[Render DB Bootstrap] Cash counters warning: {e}")
+
+    # Ensure Stores material requisitions exist for Shop Indents, OMS Bulk Orders, and Factory BOMs
+    try:
+        cur.execute("""
+            INSERT INTO stores_mod.material_requisitions 
+            (req_no, prod_no, factory_code, fg_sku, fg_name, planned_qty, uom, store_code, status, bom_items, requested_by, order_type, customer_name, customer_mobile, customer_company, destination)
+            VALUES
+            ('REQ-SHOP-2026-081', 'IND-2026-014', 'DEL01', 'FG-RAS-01', 'Spongy White Rasgulla 1kg Box', 40.0, 'pcs', 'STR-DEL01-BACK', 'PENDING_ISSUE', '[{"rm_sku":"FG-RAS-01","rm_name":"Spongy White Rasgulla (1kg)","required_qty":40,"uom":"pcs"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":40,"uom":"pcs"}]'::jsonb, 'Shop Manager Vikram Sethi', 'Shop Indent / Requisition', 'DEL01 Connaught Place Flagship', '+91-9811000001', 'Bikanervala Retail Outlet', 'Front Mithai Counter & Display Chiller #1'),
+            ('REQ-OMS-2026-0042', 'OMS-2026-0011', 'DEL01', 'FG-KAJU-01', 'Royal Kaju Katli Heritage Hamper', 60.0, 'pkts', 'STR-MFG-RM', 'ACCEPTED', '[{"rm_sku":"RM-KAJU-01","rm_name":"Whole Cashew W240 Grade","required_qty":45,"uom":"kg"},{"rm_sku":"RM-SUG-01","rm_name":"Refined Sulphur-Free Sugar","required_qty":25,"uom":"kg"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":60,"uom":"pcs"}]'::jsonb, 'OMS Lead Rajesh Kumar', 'OMS Bulk Order', 'Meera Kapoor', '+91-9810012345', 'TechCorp India Pvt Ltd', 'Connaught Place Corporate Suite 402'),
+            ('REQ-MAT-PRD-2026-092', 'PRD-2026-092', 'FAC-DEL01', 'FG-RAS-01', 'Spongy White Rasgulla (Batch 92)', 100.0, 'kg', 'STR-MFG-RM', 'PENDING_ISSUE', '[{"rm_sku":"RM-MILK-01","rm_name":"Full Cream Cow Milk (A2 Raw)","required_qty":500.0,"uom":"Litre"},{"rm_sku":"RM-SUGAR-01","rm_name":"Pharma Grade Refined Sugar M-30","required_qty":80.0,"uom":"kg"}]'::jsonb, 'Production Manager Ramesh Verma', 'Factory BOM Requisition', 'Sweet Factory Division', '+91-9811000003', 'Bikanervala Central Kitchen', 'FAC-DEL01 Steam Kettle #2')
+            ON CONFLICT (req_no) DO UPDATE SET 
+                order_type = EXCLUDED.order_type,
+                customer_name = EXCLUDED.customer_name,
+                customer_mobile = EXCLUDED.customer_mobile,
+                customer_company = EXCLUDED.customer_company,
+                destination = EXCLUDED.destination;
+        """)
+        print("[Render DB Bootstrap] Ensured Shop, OMS & Factory stores material requisitions exist.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Stores requisitions seed warning: {e}")
 
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
 

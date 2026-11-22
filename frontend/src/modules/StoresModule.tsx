@@ -36,11 +36,21 @@ import {
   ChevronDown,
   CheckCheck,
   Paperclip,
+  Barcode,
+  Printer,
+  Gift,
+  Store,
+  Tag,
+  Truck,
+  FileSpreadsheet,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
+import { RawMaterialSearchPanel } from "../components/RawMaterialSearchPanel";
+import { StoresReportsPanel } from "../components/StoresReportsPanel";
+import { StoresOutwardSlipModal, StoresSlipData } from "../components/StoresOutwardSlipModal";
 
 interface StoresModuleProps {
-  initialTab?: "inbox" | "checkinout" | "batches" | "bom" | "alerts" | "transfer";
+  initialTab?: "inbox" | "search" | "checkinout" | "batches" | "bom" | "alerts" | "transfer" | "reports";
 }
 
 interface BomIngredient {
@@ -72,9 +82,15 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
   const [boms, setBoms] = useState<BomMaster[]>([]);
   const [selectedStore, setSelectedStore] = useState<string>("");
   const [festivalMult, setFestivalMult] = useState<number>(1.0);
-  const [tab, setTab] = useState<"inbox" | "checkinout" | "batches" | "bom" | "alerts" | "transfer">(initialTab);
+  const [tab, setTab] = useState<"inbox" | "search" | "checkinout" | "batches" | "bom" | "alerts" | "transfer" | "reports">(initialTab);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
   const [issuingId, setIssuingId] = useState<number | null>(null);
+  const [acceptingId, setAcceptingId] = useState<number | null>(null);
+  const [selectedSlip, setSelectedSlip] = useState<StoresSlipData | null>(null);
+  const [showSlipModal, setShowSlipModal] = useState(false);
+  const [checkingOutReq, setCheckingOutReq] = useState<any | null>(null);
+  const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [gateCheckoutDest, setGateCheckoutDest] = useState("");
   const [searchReq, setSearchReq] = useState("");
   const [selectedReqIds, setSelectedReqIds] = useState<number[]>([]);
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -561,6 +577,70 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
     }
   };
 
+  const handleAcceptRequisition = async (reqId: number) => {
+    setAcceptingId(reqId);
+    try {
+      const res = await apiFetch<any>(`/api/stores/material-requisitions/${reqId}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ actor: "Suresh Sharma (Central Stores Head)" }),
+      });
+      notify(true, res.message || "Order officially ACCEPTED! Ready for Stores Check-Out Gate.");
+      load();
+    } catch (e: any) {
+      notify(false, e.message || "Failed to accept requisition");
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  const handleOpenCheckoutModal = (req: any) => {
+    setCheckingOutReq(req);
+    const defaultDest =
+      req.destination ||
+      (req.order_type === "Shop Indent / Requisition"
+        ? "Front Mithai Counter & Display Chiller #1"
+        : req.order_type === "OMS Bulk Order"
+        ? "Connaught Place Corporate Suite 402"
+        : "FAC-DEL01 Steam Kettle #2");
+    setGateCheckoutDest(defaultDest);
+    setShowCheckoutModal(true);
+  };
+
+  const handleExecuteCheckout = async () => {
+    if (!checkingOutReq) return;
+    setIssuingId(checkingOutReq.id);
+    try {
+      const res = await apiFetch<any>(`/api/stores/material-requisitions/${checkingOutReq.id}/checkout`, {
+        method: "POST",
+        body: JSON.stringify({
+          actor: "Suresh Sharma (Central Stores Head)",
+          destination_ref: gateCheckoutDest,
+        }),
+      });
+      notify(true, res.message || "Stores Check-Out completed! 40-Col slip generated.");
+      setShowCheckoutModal(false);
+      if (res.slip) {
+        setSelectedSlip(res.slip);
+        setShowSlipModal(true);
+      }
+      load();
+    } catch (e: any) {
+      notify(false, e.message || "Stores Check-Out failed");
+    } finally {
+      setIssuingId(null);
+    }
+  };
+
+  const handlePrintSlip = async (reqId: number) => {
+    try {
+      const slipData = await apiFetch<StoresSlipData>(`/api/stores/material-requisitions/${reqId}/slip`);
+      setSelectedSlip(slipData);
+      setShowSlipModal(true);
+    } catch (e: any) {
+      notify(false, e.message || "Failed to load slip data");
+    }
+  };
+
   const issueRequisitionBom = async (reqId: number, prodNo: string) => {
     setIssuingId(reqId);
     try {
@@ -720,6 +800,13 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
               badgeColor: "bg-amber-500 text-white",
             },
             {
+              id: "search",
+              label: "🔍 Search Raw Material",
+              icon: Search,
+              badge: "Stock & Trends",
+              badgeColor: "bg-cyan-600 text-white",
+            },
+            {
               id: "checkinout",
               label: "Check-In & Check-Out Desk",
               icon: ArrowDownToLine,
@@ -734,6 +821,13 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
               icon: BellRing,
             },
             { id: "transfer", label: "Inter-Store Transfer (IST)", icon: ArrowRightLeft },
+            {
+              id: "reports",
+              label: "📊 Stores Reports",
+              icon: FileSpreadsheet,
+              badge: "Valuation & Vendor",
+              badgeColor: "bg-indigo-600 text-white",
+            },
           ].map((t) => {
             const Icon = t.icon;
             const isActive = tab === t.id;
@@ -850,15 +944,33 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
               </div>
             ) : (
               filteredReqs.map((req) => {
-                const isIssued = req.status === "ISSUED";
-                const isProcessing = issuingId === req.id;
+                const isIssued = req.status === "ISSUED" || req.status === "CHECKOUT_DONE";
+                const isAccepted = req.status === "ACCEPTED";
+                const isPending = !isIssued && !isAccepted;
+                const isProcessing = issuingId === req.id || acceptingId === req.id;
+
+                const orderType = req.order_type || (req.req_no?.startsWith("REQ-SHOP") ? "Shop Indent / Requisition" : req.req_no?.startsWith("REQ-OMS") ? "OMS Bulk Order" : "Factory BOM Requisition");
+                const isShop = orderType.includes("Shop");
+                const isOms = orderType.includes("OMS");
+
+                const typeBadge = isShop
+                  ? "bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                  : isOms
+                  ? "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950 dark:text-purple-300"
+                  : "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300";
+
+                const typeIcon = isShop ? "🏪" : isOms ? "🎁" : "🏭";
+
                 return (
                   <div
                     key={req.id}
-                    className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-sm transition ${isIssued
-                      ? "border-emerald-200/80 dark:border-emerald-900/60"
-                      : "border-amber-200 dark:border-amber-900/60 bg-amber-50/20"
-                      }`}
+                    className={`bg-white dark:bg-slate-900 border rounded-2xl p-5 shadow-sm transition space-y-3.5 ${
+                      isIssued
+                        ? "border-emerald-200/80 dark:border-emerald-900/60"
+                        : isAccepted
+                        ? "border-cyan-300 dark:border-cyan-800 bg-cyan-50/15"
+                        : "border-amber-200 dark:border-amber-900/60 bg-amber-50/20"
+                    }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="flex items-start gap-3">
@@ -879,67 +991,153 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
                             )}
                           </button>
                         )}
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-blue-600 text-sm">{req.req_no}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isIssued
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                                }`}
-                            >
-                              {isIssued ? "MATERIALS ISSUED" : "PENDING STORE ISSUE"}
+                        <div className="space-y-1.5">
+                          {/* Order Badges Header */}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono font-bold text-blue-600 text-sm">
+                              {req.req_no}
                             </span>
-                            <span className="font-mono text-xs text-slate-500">Ref: {req.prod_no}</span>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-extrabold border ${typeBadge} flex items-center gap-1`}>
+                              <span>{typeIcon}</span>
+                              <span>{orderType}</span>
+                            </span>
+                            {isIssued ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                CHECKOUT COMPLETE & OUTWARDED
+                              </span>
+                            ) : isAccepted ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 flex items-center gap-1">
+                                <Check className="w-3 h-3 text-cyan-600" />
+                                ACCEPTED — READY FOR CHECK-OUT
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                PENDING STORE ACCEPTANCE
+                              </span>
+                            )}
+                            <span className="font-mono text-xs text-slate-500">
+                              Ref: {req.prod_no}
+                            </span>
                           </div>
+
                           <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                            Produce {req.qty_to_produce} kg of {req.fg_name} ({req.fg_sku})
+                            {req.fg_name} {req.planned_qty ? `(${req.planned_qty} ${req.uom || "kg"})` : ""}
                           </h4>
-                          <div className="text-[11px] text-slate-500 flex items-center gap-4">
-                            <span>Requisitioned By: <b>{req.requested_by}</b></span>
-                            <span>Est. RM Cost: <b>{formatINR(req.estimated_rm_cost || 0)}</b></span>
-                            {req.issued_at && <span>Issued At: {new Date(req.issued_at).toLocaleString()}</span>}
+
+                          {/* Customer & Department Details */}
+                          <div className="bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 space-y-1">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                              <div>
+                                <span className="font-semibold text-slate-500">Party / Outlet:</span>{" "}
+                                <span className="font-bold text-slate-900 dark:text-slate-100">
+                                  {req.customer_name || "Internal Division"}
+                                </span>
+                              </div>
+                              {req.customer_company && (
+                                <div>
+                                  <span className="font-semibold text-slate-500">Company:</span>{" "}
+                                  <span className="font-medium">{req.customer_company}</span>
+                                </div>
+                              )}
+                              {req.customer_mobile && (
+                                <div>
+                                  <span className="font-semibold text-slate-500">Phone:</span>{" "}
+                                  <span className="font-mono text-slate-800 dark:text-slate-200">{req.customer_mobile}</span>
+                                </div>
+                              )}
+                              {req.destination && (
+                                <div>
+                                  <span className="font-semibold text-slate-500">Destination:</span>{" "}
+                                  <span className="font-medium text-blue-600 dark:text-sky-400">{req.destination}</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 text-[11px] text-slate-500 pt-0.5">
+                              <span>Requisitioned By: <b>{req.requested_by}</b></span>
+                              {req.accepted_by && <span>Accepted By: <b className="text-cyan-700 dark:text-cyan-400">{req.accepted_by}</b></span>}
+                              {req.checkout_by && <span>Checked Out By: <b className="text-emerald-700 dark:text-emerald-400">{req.checkout_by}</b></span>}
+                              {req.issued_at && <span>At: {new Date(req.issued_at).toLocaleString()}</span>}
+                            </div>
                           </div>
                         </div>
                       </div>
 
-                      <div>
+                      {/* Action Buttons: 2-Step Gate (Accept -> Checkout) & 40-Col Slip */}
+                      <div className="flex items-center gap-2 flex-wrap">
                         {isIssued ? (
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800">
-                            <Check className="w-4 h-4" />
-                            Issued by {req.issued_by || "Stores"}
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePrintSlip(req.id)}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition transform active:scale-95"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>🖨️ Print 40-Col Slip</span>
+                            </button>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              {req.slip_barcode || `BC-${req.id}`}
+                            </span>
+                          </div>
+                        ) : isAccepted ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenCheckoutModal(req)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition transform active:scale-95"
+                            >
+                              <ArrowUpFromLine className="w-3.5 h-3.5" />
+                              <span>📤 Stores Check-Out Gate</span>
+                            </button>
+                            <span className="text-[10px] text-amber-600 font-bold">
+                              (Deducts stock & generates slip)
+                            </span>
                           </div>
                         ) : (
-                          <button
-                            onClick={() => issueRequisitionBom(req.id, req.prod_no)}
-                            disabled={isProcessing}
-                            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2 transition disabled:opacity-50"
-                          >
-                            {isProcessing ? (
-                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <PackageCheck className="w-3.5 h-3.5" />
-                            )}
-                            Issue BOM Raw Materials via FEFO
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptRequisition(req.id)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold rounded-xl text-xs shadow-md flex items-center gap-1.5 transition transform active:scale-95"
+                            >
+                              {isProcessing ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5" />
+                              )}
+                              <span>✓ Accept Order</span>
+                            </button>
+                            <span className="text-[10px] text-slate-400 italic">
+                              (Outward via Checkout only)
+                            </span>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Ingredients Breakdown */}
-                    {req.ingredients && req.ingredients.length > 0 && (
-                      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
-                        <div className="text-[11px] font-bold text-slate-500 mb-2">Required BOM Formulation:</div>
+                    {/* Items Breakdown */}
+                    {req.bom_items && (
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <div className="text-[11px] font-bold text-slate-500 mb-1.5">
+                          Requested Material Lots & Quantities:
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-                          {req.ingredients.map((ing: any, i: number) => (
+                          {(Array.isArray(req.bom_items) ? req.bom_items : JSON.parse(req.bom_items || "[]")).map((ing: any, i: number) => (
                             <div
                               key={i}
-                              className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px]"
+                              className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px]"
                             >
-                              <div className="font-bold text-slate-800 dark:text-slate-200 truncate">{ing.rm_name}</div>
-                              <div className="font-mono text-slate-500">{ing.rm_sku}</div>
-                              <div className="text-blue-600 font-bold mt-1">
-                                {ing.required_qty} {ing.uom}
+                              <div className="font-bold text-slate-800 dark:text-slate-200 truncate">
+                                {ing.rm_name || ing.name || ing.rm_sku}
+                              </div>
+                              <div className="font-mono text-slate-500 text-[10px]">
+                                {ing.rm_sku || ing.sku}
+                              </div>
+                              <div className="text-blue-600 font-black mt-0.5">
+                                {ing.required_qty || ing.qty} {ing.uom}
                               </div>
                             </div>
                           ))}
@@ -953,6 +1151,16 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
           </div>
         </div>
       )}
+
+      {/* ========================================================
+          TAB: SEARCH RAW MATERIALS & PREDICTIVE USAGE TRENDS
+      ======================================================== */}
+      {tab === "search" && <RawMaterialSearchPanel />}
+
+      {/* ========================================================
+          TAB: STORES & INVENTORY BUSINESS INTELLIGENCE REPORTS
+      ======================================================== */}
+      {tab === "reports" && <StoresReportsPanel />}
 
       {/* ========================================================
           TAB 1: CHECK-IN & CHECK-OUT DESK (MATERIAL MOVEMENTS)
@@ -2411,6 +2619,111 @@ export const StoresModule: React.FC<StoresModuleProps> = ({ initialTab = "inbox"
           </button>
         </form>
       )}
+
+      {/* Stores Check-Out Gate Confirmation Modal */}
+      {showCheckoutModal && checkingOutReq && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col">
+            <div className="p-4 bg-gradient-to-r from-amber-600 to-orange-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center font-bold text-lg">
+                  📤
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">Stores Check-Out Outward Gate</h3>
+                  <p className="text-amber-100 text-xs">Verify FEFO Deductions & Outward Handover</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCheckoutModal(false)}
+                className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-700 dark:text-slate-300">
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <span>
+                  <b>Physical Outward Gate Pass:</b> Stock will be automatically deducted from Stores batches via FEFO. A 40-Column Dispatch Slip with Barcode will be generated immediately.
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+                <div>
+                  <span className="text-slate-500 block">Req No:</span>
+                  <span className="font-mono font-bold text-blue-600">{checkingOutReq.req_no}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Order Type:</span>
+                  <span className="font-bold">{checkingOutReq.order_type || "Shop Indent / Requisition"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Party / Outlet:</span>
+                  <span className="font-bold text-slate-900 dark:text-slate-100">{checkingOutReq.customer_name || "Internal"}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Target Product:</span>
+                  <span className="font-bold">{checkingOutReq.fg_name}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Destination / Delivery Point:
+                </label>
+                <input
+                  type="text"
+                  value={checkoutDestination}
+                  onChange={(e) => setCheckoutDestination(e.target.value)}
+                  placeholder="e.g. Front Mithai Counter, OMS Van #4, or Kettle #2"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium"
+                />
+              </div>
+
+              <div>
+                <span className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Storekeeper Dispatch Officer:
+                </span>
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200">
+                  Suresh Sharma (Central Stores Head) • EMP-004
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCheckoutModal(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 font-bold text-xs hover:bg-slate-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteCheckout}
+                disabled={issuingId === checkingOutReq.id}
+                className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-extrabold text-xs shadow-md flex items-center gap-1.5 transition disabled:opacity-50"
+              >
+                {issuingId === checkingOutReq.id ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowUpFromLine className="w-3.5 h-3.5" />
+                )}
+                <span>Confirm Check-Out & Generate 40-Col Slip</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 40-Column Stores Outward Thermal Slip Modal */}
+      <StoresOutwardSlipModal
+        isOpen={showSlipModal}
+        onClose={() => setShowSlipModal(false)}
+        slip={selectedSlip}
+      />
     </div>
   );
 };

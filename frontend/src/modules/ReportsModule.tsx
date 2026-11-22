@@ -30,11 +30,12 @@ import {
   FileCheck2,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
+import { StoresReportsPanel } from "../components/StoresReportsPanel";
 
 export const ReportsModule: React.FC = () => {
   // Navigation & Lens Filters
   const [activeTab, setActiveTab] = useState<
-    "overview" | "products" | "categories" | "quarterly" | "channels" | "tenders" | "gst" | "catalog"
+    "overview" | "stores" | "products" | "categories" | "quarterly" | "channels" | "tenders" | "gst" | "catalog"
   >("overview");
   const [timeline, setTimeline] = useState<string>("monthly");
   const [quarter, setQuarter] = useState<string>("Q3");
@@ -489,13 +490,14 @@ export const ReportsModule: React.FC = () => {
       <div className="flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-xs font-bold">
         {[
           { id: "overview", label: "📈 Overview & Trends" },
+          { id: "stores", label: "🏬 Stores & Inventory Reports" },
           { id: "products", label: "🍬 Product-Wise Matrix" },
           { id: "categories", label: "🏷️ Category Performance" },
           { id: "quarterly", label: "🗓️ Quarterly Comparison" },
           { id: "channels", label: "🛵 Channel & Aggregator Mix" },
           { id: "tenders", label: "💳 Payment Modes" },
           { id: "gst", label: "⚖️ GST & HSN Reconciliation" },
-          { id: "catalog", label: "📂 Standard Compliance Reports (10)" },
+          { id: "catalog", label: "📂 Standard Compliance Reports (13)" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -586,6 +588,11 @@ export const ReportsModule: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* TAB: STORES & INVENTORY REPORTS */}
+      {activeTab === "stores" && (
+        <StoresReportsPanel />
       )}
 
       {/* TAB 2: PRODUCT-WISE PERFORMANCE MATRIX */}

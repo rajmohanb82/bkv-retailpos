@@ -299,6 +299,16 @@ CREATE TABLE stores_mod.material_requisitions (
     requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
     issued_by VARCHAR(80),
     issued_at TIMESTAMPTZ,
+    order_type VARCHAR(60) DEFAULT 'Factory BOM Requisition',
+    customer_name VARCHAR(120),
+    customer_mobile VARCHAR(30),
+    customer_company VARCHAR(140),
+    destination VARCHAR(160),
+    accepted_by VARCHAR(80),
+    accepted_at TIMESTAMPTZ,
+    checkout_by VARCHAR(80),
+    checkout_at TIMESTAMPTZ,
+    slip_barcode VARCHAR(60),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -777,9 +787,11 @@ INSERT INTO factory_mod.production_orders (prod_no, fg_sku, fg_name, sweet_line,
 ('PRD-2026-093', 'FG-KAJU-01', 'Royal Silver-Leaf Kaju Katli', 'Dry Fruit Sweets', 80.0, NULL, 'kg', 'OMS Bulk', 'OMS-2026-0011', 'Copper Karahi #3', 'Afternoon Shift', 'InProduction', 51360.00, 51360.00, 3600.00, 0, 'FG-KJU-261112', CURRENT_DATE, CURRENT_DATE + 15, '{}'::jsonb, 'FAC-DEL01', 'DEL01', 'ISSUED', 60),
 ('PRD-2026-094', 'FG-BESAN-01', 'Desi Ghee Besan Laddu', 'Ghee Sweets', 60.0, 57.1, 'kg', 'Outlet Indent', 'IND-2026-015', 'Roti Karahi #1', 'Morning Shift', 'QualityCheck', 17304.00, 17450.00, 2100.00, -4.83, 'FG-BSN-261112', CURRENT_DATE, CURRENT_DATE + 21, '{"aroma":"Rich Ghee","moisture_pct":4.8}'::jsonb, 'FAC-DEL01', 'DEL01', 'ISSUED', 80);
 
--- Initial Factory Material Requisitions
-INSERT INTO stores_mod.material_requisitions (req_no, prod_no, factory_code, fg_sku, fg_name, planned_qty, uom, store_code, status, bom_items, requested_by) VALUES
-('REQ-MAT-PRD-2026-092', 'PRD-2026-092', 'FAC-DEL01', 'FG-RAS-01', 'Spongy White Rasgulla', 100.0, 'kg', 'STR-MFG-RM', 'PENDING_ISSUE', '[{"rm_sku":"RM-MILK-01","rm_name":"Full Cream Cow Milk (A2 Raw)","required_qty":500.0,"uom":"Litre"},{"rm_sku":"RM-SUGAR-01","rm_name":"Pharma Grade Refined Sugar M-30","required_qty":80.0,"uom":"kg"}]'::jsonb, 'Production Manager')
+-- Initial Stores Material Requisitions (Shop Indents, OMS Bulk, Factory Requisitions)
+INSERT INTO stores_mod.material_requisitions (req_no, prod_no, factory_code, fg_sku, fg_name, planned_qty, uom, store_code, status, bom_items, requested_by, order_type, customer_name, customer_mobile, customer_company, destination) VALUES
+('REQ-SHOP-2026-081', 'IND-2026-014', 'DEL01', 'FG-RAS-01', 'Spongy White Rasgulla 1kg Box', 40.0, 'pcs', 'STR-DEL01-BACK', 'PENDING_ISSUE', '[{"rm_sku":"FG-RAS-01","rm_name":"Spongy White Rasgulla (1kg)","required_qty":40,"uom":"pcs"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":40,"uom":"pcs"}]'::jsonb, 'Shop Manager Vikram Sethi', 'Shop Indent / Requisition', 'DEL01 Connaught Place Flagship', '+91-9811000001', 'Bikanervala Retail Outlet', 'Front Mithai Counter & Display Chiller #1'),
+('REQ-OMS-2026-0042', 'OMS-2026-0011', 'DEL01', 'FG-KAJU-01', 'Royal Kaju Katli Heritage Hamper', 60.0, 'pkts', 'STR-MFG-RM', 'ACCEPTED', '[{"rm_sku":"RM-KAJU-01","rm_name":"Whole Cashew W240 Grade","required_qty":45,"uom":"kg"},{"rm_sku":"RM-SUG-01","rm_name":"Refined Sulphur-Free Sugar","required_qty":25,"uom":"kg"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":60,"uom":"pcs"}]'::jsonb, 'OMS Lead Rajesh Kumar', 'OMS Bulk Order', 'Meera Kapoor', '+91-9810012345', 'TechCorp India Pvt Ltd', 'Connaught Place Corporate Suite 402'),
+('REQ-MAT-PRD-2026-092', 'PRD-2026-092', 'FAC-DEL01', 'FG-RAS-01', 'Spongy White Rasgulla (Batch 92)', 100.0, 'kg', 'STR-MFG-RM', 'PENDING_ISSUE', '[{"rm_sku":"RM-MILK-01","rm_name":"Full Cream Cow Milk (A2 Raw)","required_qty":500.0,"uom":"Litre"},{"rm_sku":"RM-SUGAR-01","rm_name":"Pharma Grade Refined Sugar M-30","required_qty":80.0,"uom":"kg"}]'::jsonb, 'Production Manager Ramesh Verma', 'Factory BOM Requisition', 'Sweet Factory Division', '+91-9811000003', 'Bikanervala Central Kitchen', 'FAC-DEL01 Steam Kettle #2')
 ON CONFLICT (req_no) DO NOTHING;
 
 INSERT INTO factory_mod.wip_stages (prod_no, stage_name, input_sku, input_qty, output_sku, output_qty, yield_pct, status) VALUES

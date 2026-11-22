@@ -111,7 +111,7 @@ export default function App() {
     }
   });
   const [activeModule, setActiveModule] = useState<ModuleId>("executive");
-  const [storesSubTab, setStoresSubTab] = useState<"inbox" | "batches" | "bom" | "alerts" | "transfer">("inbox");
+  const [storesSubTab, setStoresSubTab] = useState<"inbox" | "search" | "checkinout" | "batches" | "bom" | "alerts" | "transfer" | "reports">("inbox");
   const [factorySubTab, setFactorySubTab] = useState<"inbox" | "kettles" | "orders" | "qc" | "dispatch" | "tracker">("inbox");
   const [omsSubTab, setOmsSubTab] = useState<"aggregators" | "bulk" | "config">("aggregators");
   const [adminSubTab, setAdminSubTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">("outlets");
@@ -577,10 +577,12 @@ export default function App() {
                     <div className="bg-slate-50/90 dark:bg-slate-900/70 backdrop-blur-sm rounded-2xl p-1.5 border border-slate-200/80 dark:border-slate-800/80 shadow-sm space-y-0.5">
                       {[
                         { id: "inbox", label: "📥 Stores Inbox", sub: "Material Requisitions" },
+                        { id: "search", label: "🔍 Search Raw Material", sub: "Stock & Usage Trends" },
                         { id: "batches", label: "📦 Stock Batches", sub: "FEFO Inventory" },
                         { id: "bom", label: "📋 BOM Exploder", sub: "Recipe Issuance" },
                         { id: "alerts", label: "🔔 Alerts & Expiry", sub: "Dynamic ROP" },
                         { id: "transfer", label: "🚚 Transfer (IST)", sub: "E-Way Bills" },
+                        { id: "reports", label: "📊 Stores Reports", sub: "Valuation & Vendor Ledger" },
                       ].map((sub) => {
                         const isSubActive = isActive && storesSubTab === sub.id;
                         return (

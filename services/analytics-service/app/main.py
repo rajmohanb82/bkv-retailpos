@@ -132,6 +132,9 @@ def report_catalog():
         {"id": "kot_sla", "category": "3. KOT & Restaurant", "name": "Kitchen Station & Aggregator KOT Report", "description": "Station-wise KOT load, Dine-in vs Zomato/Swiggy & Void reasons"},
         {"id": "oms_pipeline", "category": "4. OMS & Bulk Orders", "name": "Marriage / Corporate / Festival Order Pipeline", "description": "BOM cost, selling price, margin %, advance paid & balance receivable"},
         {"id": "inv_expiry", "category": "5. Stores & Inventory", "name": "FEFO Near-Expiry & Stock Valuation Report", "description": "Batch-wise MFG, Expiry, Remaining Days & Value at Risk"},
+        {"id": "stores_item_stock", "category": "5. Stores & Inventory", "name": "Item-wise Stock & Movement Ledger", "description": "Raw material & packaging stock, reorder levels, unit costs & total valuation"},
+        {"id": "stores_total_inventory", "category": "5. Stores & Inventory", "name": "Total Stores Inventory Valuation & Aging", "description": "Store-wise asset valuation, fresh stock (<30d), aging stock and near-expiry risk"},
+        {"id": "stores_vendor_procurement", "category": "5. Stores & Inventory", "name": "Vendor-wise Procurement & Lead Time Ledger", "description": "Vendor materials supplied, PO spend, lead times, FSSAI compliance and spend"},
         {"id": "factory_yield", "category": "6. Sweet Production Factory", "name": "BOM Theoretical vs Actual Yield Variance & COGS", "description": "Highlights batches exceeding ±2% yield tolerance and batch unit COGS"},
         {"id": "vendor_score", "category": "7. Vendor & Procurement", "name": "Vendor Compliance, FSSAI Expiry & 3-Way Match Log", "description": "GSTN/FSSAI validity, PO vs GRN vs Invoice matching status"},
         {"id": "gst_hsn", "category": "8. Statutory, GST & FSSAI", "name": "GSTR-1 / GSTR-3B & HSN Tax Summary", "description": "HSN-wise taxable value, CGST, SGST across 5%, 12% & 18% slabs"},
@@ -173,6 +176,68 @@ def run_report(report_id: str, batch_query: str = Query("")):
                 "SELECT store_code, sku, item_name, batch_no, qty, uom, unit_cost, ROUND(qty*unit_cost, 2) AS stock_value, mfg_date, expiry_date, (expiry_date - CURRENT_DATE) AS days_left FROM stores_mod.stock_batches WHERE qty > 0 ORDER BY expiry_date ASC"
             ).fetchall()
             return {"title": "FEFO Near-Expiry & Stock Valuation Report", "rows": rows}
+        if report_id == "stores_item_stock":
+            rows = conn.execute(
+                """
+                SELECT i.sku, i.name, i.category, i.sub_category, i.inventory_uom,
+                       i.cost_price, i.min_par_level,
+                       COALESCE(SUM(b.qty), 0) AS current_stock,
+                       ROUND(COALESCE(SUM(b.qty * b.unit_cost), 0), 2) AS total_valuation,
+                       COALESCE(inw.inward_qty, 0) AS total_inward_qty,
+                       COALESCE(outw.outward_qty, 0) AS total_outward_qty
+                FROM admin_mod.items i
+                LEFT JOIN stores_mod.stock_batches b ON b.sku = i.sku AND b.qty > 0 AND b.qc_status = 'PASSED'
+                LEFT JOIN (
+                    SELECT sku, SUM(qty) AS inward_qty FROM stores_mod.stock_movements
+                    WHERE movement_type IN ('CHECK_IN_GRN', 'GRN', 'MANUAL_IN')
+                    GROUP BY sku
+                ) inw ON inw.sku = i.sku
+                LEFT JOIN (
+                    SELECT sku, SUM(qty) AS outward_qty FROM stores_mod.stock_movements
+                    WHERE movement_type IN ('CHECK_OUT_ISSUE', 'BOM_ISSUE', 'TRANSFER_OUT', 'WASTAGE')
+                    GROUP BY sku
+                ) outw ON outw.sku = i.sku
+                WHERE i.category IN ('RM', 'Packaging', 'FG-Sweet')
+                GROUP BY i.sku, i.name, i.category, i.sub_category, i.inventory_uom, i.cost_price, i.min_par_level, inw.inward_qty, outw.outward_qty
+                ORDER BY total_valuation DESC
+                """
+            ).fetchall()
+            return {"title": "Item-wise Stock & Movement Ledger", "rows": rows}
+        if report_id == "stores_total_inventory":
+            rows = conn.execute(
+                """
+                SELECT s.store_code, s.name, s.outlet_code, s.store_type, s.temp_zone,
+                       COUNT(b.id) AS batches_count,
+                       COUNT(DISTINCT b.sku) AS items_count,
+                       COALESCE(SUM(b.qty), 0) AS total_qty,
+                       ROUND(COALESCE(SUM(b.qty * b.unit_cost), 0), 2) AS total_value,
+                       ROUND(COALESCE(SUM(CASE WHEN (b.expiry_date - CURRENT_DATE) >= 30 THEN b.qty * b.unit_cost ELSE 0 END), 0), 2) AS fresh_value,
+                       ROUND(COALESCE(SUM(CASE WHEN (b.expiry_date - CURRENT_DATE) BETWEEN 8 AND 29 THEN b.qty * b.unit_cost ELSE 0 END), 0), 2) AS aging_value,
+                       ROUND(COALESCE(SUM(CASE WHEN (b.expiry_date - CURRENT_DATE) <= 7 THEN b.qty * b.unit_cost ELSE 0 END), 0), 2) AS risk_value
+                FROM stores_mod.stores s
+                LEFT JOIN stores_mod.stock_batches b ON b.store_code = s.store_code AND b.qty > 0 AND b.qc_status = 'PASSED'
+                WHERE s.active = TRUE
+                GROUP BY s.id, s.store_code, s.name, s.outlet_code, s.store_type, s.temp_zone
+                ORDER BY total_value DESC
+                """
+            ).fetchall()
+            return {"title": "Total Stores Inventory Valuation & Aging Breakdown", "rows": rows}
+        if report_id == "stores_vendor_procurement":
+            rows = conn.execute(
+                """
+                SELECT v.vendor_code, v.trade_name, v.contact_person, v.mobile, v.gstin, v.fssai_no, v.fssai_expiry,
+                       v.payment_terms, v.quality_rating,
+                       COUNT(DISTINCT m.rm_sku) AS materials_count,
+                       COALESCE(COUNT(DISTINCT p.id), 0) AS po_count,
+                       ROUND(COALESCE(SUM(p.total_amount), 0), 2) AS total_spend
+                FROM vendor_mod.vendors v
+                LEFT JOIN vendor_mod.vendor_rm_mapping m ON m.vendor_code = v.vendor_code
+                LEFT JOIN vendor_mod.purchase_orders p ON p.vendor_code = v.vendor_code
+                GROUP BY v.id, v.vendor_code, v.trade_name, v.contact_person, v.mobile, v.gstin, v.fssai_no, v.fssai_expiry, v.payment_terms, v.quality_rating
+                ORDER BY total_spend DESC
+                """
+            ).fetchall()
+            return {"title": "Vendor-wise Raw Material Procurement & Lead Time Ledger", "rows": rows}
         if report_id == "factory_yield":
             rows = conn.execute(
                 "SELECT prod_no, fg_sku, fg_name, sweet_line, planned_qty, actual_qty, yield_variance_pct, expected_rm_cost, actual_rm_cost, labor_overhead, batch_no, mfg_date, expiry_date, status FROM factory_mod.production_orders ORDER BY id DESC"

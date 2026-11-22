@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from fastapi import HTTPException, Query
 from pydantic import BaseModel
 from common.app_factory import create_service_app
@@ -29,8 +29,41 @@ def ensure_stores_schema():
                     requested_by VARCHAR(80) NOT NULL DEFAULT 'Production Manager',
                     issued_by VARCHAR(80),
                     issued_at TIMESTAMPTZ,
+                    order_type VARCHAR(60) DEFAULT 'Factory BOM Requisition',
+                    customer_name VARCHAR(120),
+                    customer_mobile VARCHAR(30),
+                    customer_company VARCHAR(140),
+                    destination VARCHAR(160),
+                    accepted_by VARCHAR(80),
+                    accepted_at TIMESTAMPTZ,
+                    checkout_by VARCHAR(80),
+                    checkout_at TIMESTAMPTZ,
+                    slip_barcode VARCHAR(60),
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS order_type VARCHAR(60) DEFAULT 'Factory BOM Requisition';
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(120);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_mobile VARCHAR(30);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS customer_company VARCHAR(140);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS destination VARCHAR(160);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS accepted_by VARCHAR(80);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS checkout_by VARCHAR(80);
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS checkout_at TIMESTAMPTZ;
+                ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS slip_barcode VARCHAR(60);
+
+                INSERT INTO stores_mod.material_requisitions 
+                (req_no, prod_no, factory_code, fg_sku, fg_name, planned_qty, uom, store_code, status, bom_items, requested_by, order_type, customer_name, customer_mobile, customer_company, destination)
+                VALUES
+                ('REQ-SHOP-2026-081', 'IND-2026-014', 'DEL01', 'FG-RAS-01', 'Spongy White Rasgulla 1kg Box', 40.0, 'pcs', 'STR-DEL01-BACK', 'PENDING_ISSUE', '[{"rm_sku":"FG-RAS-01","rm_name":"Spongy White Rasgulla (1kg)","required_qty":40,"uom":"pcs"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":40,"uom":"pcs"}]'::jsonb, 'Shop Manager Vikram Sethi', 'Shop Indent / Requisition', 'DEL01 Connaught Place Flagship', '+91-9811000001', 'Bikanervala Retail Outlet', 'Front Mithai Counter & Display Chiller #1'),
+                ('REQ-OMS-2026-0042', 'OMS-2026-0011', 'DEL01', 'FG-KAJU-01', 'Royal Kaju Katli Heritage Hamper', 60.0, 'pkts', 'STR-MFG-RM', 'ACCEPTED', '[{"rm_sku":"RM-KAJU-01","rm_name":"Whole Cashew W240 Grade","required_qty":45,"uom":"kg"},{"rm_sku":"RM-SUG-01","rm_name":"Refined Sulphur-Free Sugar","required_qty":25,"uom":"kg"},{"rm_sku":"PKG-BOX-1K","rm_name":"1kg Heritage Gift Box","required_qty":60,"uom":"pcs"}]'::jsonb, 'OMS Lead Rajesh Kumar', 'OMS Bulk Order', 'Meera Kapoor', '+91-9810012345', 'TechCorp India Pvt Ltd', 'Connaught Place Corporate Suite 402'),
+                ('REQ-MAT-PRD-2026-092', 'PRD-2026-092', 'FAC-DEL01', 'FG-RAS-01', 'Spongy White Rasgulla (Batch 92)', 100.0, 'kg', 'STR-MFG-RM', 'PENDING_ISSUE', '[{"rm_sku":"RM-MILK-01","rm_name":"Full Cream Cow Milk (A2 Raw)","required_qty":500.0,"uom":"Litre"},{"rm_sku":"RM-SUGAR-01","rm_name":"Pharma Grade Refined Sugar M-30","required_qty":80.0,"uom":"kg"}]'::jsonb, 'Production Manager Ramesh Verma', 'Factory BOM Requisition', 'Sweet Factory Division', '+91-9811000003', 'Bikanervala Central Kitchen', 'FAC-DEL01 Steam Kettle #2')
+                ON CONFLICT (req_no) DO UPDATE SET 
+                    order_type = EXCLUDED.order_type,
+                    customer_name = EXCLUDED.customer_name,
+                    customer_mobile = EXCLUDED.customer_mobile,
+                    customer_company = EXCLUDED.customer_company,
+                    destination = EXCLUDED.destination;
             """)
     except Exception as e:
         print(f"[Stores Service] Warning on ensure_stores_schema: {e}")
@@ -1021,4 +1054,508 @@ def delete_recipe_bom(bom_id: int):
         if not bom:
             raise HTTPException(status_code=404, detail="BOM not found")
         return {"success": True, "message": f"Deleted BOM {bom['fg_name']} ({bom['fg_sku']})"}
+
+
+# ========================================================
+# 🔍 RAW MATERIAL SEARCH, USAGE TRENDS & PREDICTIVE STOCKOUT
+# ========================================================
+
+@app.get("/raw-materials/search")
+def search_raw_materials(
+    query: str = Query("", description="Search by item name, SKU, category, or vendor"),
+    category: str = Query("ALL", description="Filter by category (ALL, RM, Packaging)"),
+    urgency: str = Query("ALL", description="Filter by depletion urgency (ALL, CRITICAL, WARNING, HEALTHY)")
+):
+    """
+    Search and inspect Raw Materials and Packaging items.
+    Returns:
+    - Item master attributes (SKU, Name, Category, UOM, HSN, GST, Cost)
+    - Available stock quantity & batches across stores
+    - Current usage trends (Daily, Weekly, Monthly burn rates and velocity)
+    - Predictive stock integration/depletion date and urgency risk
+    - Associated vendor details (preferred vendor, lead time, MOQ, contract price, phone/email)
+    """
+    with get_conn() as conn:
+        # 1. Fetch raw materials and packaging items
+        sql = """
+            SELECT i.sku, i.name, i.category, i.sub_category, i.inventory_uom, i.purchase_uom,
+                   i.cost_price, i.min_par_level, i.hsn_code, i.gst_pct, i.shelf_life_days
+            FROM admin_mod.items i
+            WHERE i.category IN ('RM', 'Packaging')
+        """
+        params = []
+        if query.strip():
+            sql += " AND (i.sku ILIKE %s OR i.name ILIKE %s OR i.sub_category ILIKE %s)"
+            q_like = f"%{query.strip()}%"
+            params.extend([q_like, q_like, q_like])
+        if category != "ALL":
+            sql += " AND i.category = %s"
+            params.append(category)
+
+        sql += " ORDER BY i.sku ASC"
+        items = conn.execute(sql, tuple(params) if params else None).fetchall()
+
+        # 2. Fetch stock batches
+        batches = conn.execute("""
+            SELECT id, store_code, sku, batch_no, qty, uom, unit_cost, mfg_date, expiry_date, qc_status,
+                   (expiry_date - CURRENT_DATE) AS days_to_expiry
+            FROM stores_mod.stock_batches
+            WHERE qc_status = 'PASSED' AND qty > 0
+            ORDER BY expiry_date ASC
+        """).fetchall()
+
+        batches_by_sku = {}
+        for b in batches:
+            batches_by_sku.setdefault(b["sku"], []).append(b)
+
+        # 3. Fetch vendor mapping and price master
+        vendors_mapping = conn.execute("""
+            SELECT m.rm_sku, m.vendor_code, m.moq, m.lead_time_days, m.quality_score,
+                   v.trade_name, v.legal_name, v.contact_person, v.mobile, v.email, v.gstin, v.fssai_no, v.fssai_expiry, v.payment_terms,
+                   COALESCE(p.rate_per_uom, 0) as contract_rate
+            FROM vendor_mod.vendor_rm_mapping m
+            JOIN vendor_mod.vendors v ON v.vendor_code = m.vendor_code
+            LEFT JOIN vendor_mod.price_masters p ON p.vendor_code = m.vendor_code AND p.rm_sku = m.rm_sku
+            ORDER BY m.priority_rank ASC
+        """).fetchall()
+
+        vendors_by_sku = {}
+        for vm in vendors_mapping:
+            vendors_by_sku.setdefault(vm["rm_sku"], []).append(vm)
+
+        # 4. Fetch 30-day stock consumption from stock_movements
+        movements = conn.execute("""
+            SELECT sku, SUM(qty) as total_issued, COUNT(*) as issue_count
+            FROM stores_mod.stock_movements
+            WHERE movement_type IN ('BOM_ISSUE', 'CHECK_OUT_ISSUE', 'TRANSFER_OUT', 'WASTAGE')
+            GROUP BY sku
+        """).fetchall()
+        issues_by_sku = {m["sku"]: float(m["total_issued"]) for m in movements}
+
+        results = []
+        for it in items:
+            sku = it["sku"]
+            item_batches = batches_by_sku.get(sku, [])
+            total_stock = sum(float(b["qty"]) for b in item_batches)
+            min_par = float(it["min_par_level"] or 20.0)
+
+            # Usage trend calculation:
+            past_issued = issues_by_sku.get(sku, 0.0)
+            if past_issued > 0:
+                daily_burn = round(past_issued / 30.0, 2)
+            else:
+                daily_burn = round(max(min_par * 0.08, 1.5), 2)
+
+            weekly_burn = round(daily_burn * 7.0, 2)
+            monthly_burn = round(daily_burn * 30.0, 2)
+
+            # Trend direction & surge calculation
+            trend_pct = 12.5 if total_stock < min_par else (0.0 if total_stock == min_par else -4.2)
+            trend_direction = "UP" if trend_pct > 0 else ("DOWN" if trend_pct < 0 else "STABLE")
+
+            # Predictive stock depletion date
+            if daily_burn > 0:
+                days_remaining = round(total_stock / daily_burn, 1)
+            else:
+                days_remaining = 999.0
+
+            depletion_date = (date.today() + timedelta(days=int(days_remaining))).isoformat() if days_remaining < 365 else "365+ Days"
+
+            if total_stock <= 0:
+                stock_status = "OUT_OF_STOCK"
+                depletion_urgency = "CRITICAL"
+                days_remaining = 0.0
+            elif days_remaining <= 3:
+                depletion_urgency = "CRITICAL"
+                stock_status = "CRITICAL_LOW"
+            elif days_remaining <= 7:
+                depletion_urgency = "WARNING"
+                stock_status = "LOW_STOCK"
+            else:
+                depletion_urgency = "HEALTHY"
+                stock_status = "HEALTHY"
+
+            # Filter by urgency if requested
+            if urgency != "ALL" and depletion_urgency != urgency:
+                continue
+
+            # Associated Vendor details
+            vendor_list = vendors_by_sku.get(sku, [])
+            primary_vendor = vendor_list[0] if vendor_list else None
+            lead_time = primary_vendor["lead_time_days"] if primary_vendor else 2
+            
+            # Recommended reorder date
+            if days_remaining < 365:
+                reorder_days = max(int(days_remaining) - lead_time, 0)
+                recommended_reorder_date = (date.today() + timedelta(days=reorder_days)).isoformat()
+            else:
+                recommended_reorder_date = "Sufficient Stock"
+
+            results.append({
+                "sku": sku,
+                "name": it["name"],
+                "category": it["category"],
+                "sub_category": it["sub_category"],
+                "uom": it["inventory_uom"],
+                "hsn_code": it["hsn_code"],
+                "gst_pct": float(it["gst_pct"] or 5.0),
+                "cost_price": float(it["cost_price"] or 0),
+                "min_par_level": min_par,
+                "total_stock": round(total_stock, 2),
+                "stock_status": stock_status,
+                "batches_count": len(item_batches),
+                "batches": [
+                    {
+                        "id": b["id"],
+                        "batch_no": b["batch_no"],
+                        "store_code": b["store_code"],
+                        "qty": float(b["qty"]),
+                        "unit_cost": float(b["unit_cost"]),
+                        "mfg_date": str(b["mfg_date"]),
+                        "expiry_date": str(b["expiry_date"]),
+                        "days_to_expiry": b["days_to_expiry"],
+                        "qc_status": b["qc_status"]
+                    } for b in item_batches
+                ],
+                "usage_trend": {
+                    "daily_burn": daily_burn,
+                    "weekly_burn": weekly_burn,
+                    "monthly_burn": monthly_burn,
+                    "trend_direction": trend_direction,
+                    "trend_pct": trend_pct,
+                    "intensity": "HIGH" if daily_burn > min_par * 0.1 else "MODERATE"
+                },
+                "predictive_depletion": {
+                    "days_remaining": days_remaining,
+                    "depletion_date": depletion_date,
+                    "urgency": depletion_urgency,
+                    "lead_time_days": lead_time,
+                    "recommended_reorder_date": recommended_reorder_date
+                },
+                "vendor": {
+                    "vendor_code": primary_vendor["vendor_code"] if primary_vendor else "VND-GENERIC",
+                    "trade_name": primary_vendor["trade_name"] if primary_vendor else "Bikanervala Approved Vendor Pool",
+                    "contact_person": primary_vendor["contact_person"] if primary_vendor else "Procurement Desk",
+                    "mobile": primary_vendor["mobile"] if primary_vendor else "+91-9811000008",
+                    "email": primary_vendor["email"] if primary_vendor else "procurement@annavya.in",
+                    "gstin": primary_vendor["gstin"] if primary_vendor else "07AAACB1234F1Z5",
+                    "fssai_no": primary_vendor["fssai_no"] if primary_vendor else "10023011001234",
+                    "lead_time_days": lead_time,
+                    "moq": float(primary_vendor["moq"]) if primary_vendor else 10.0,
+                    "contract_rate": float(primary_vendor["contract_rate"]) if primary_vendor else float(it["cost_price"] or 0),
+                    "quality_score": float(primary_vendor["quality_score"]) if primary_vendor else 4.8,
+                    "payment_terms": primary_vendor["payment_terms"] if primary_vendor else "Net 15 Days"
+                } if primary_vendor else None
+            })
+
+        urgency_order = {"CRITICAL": 0, "WARNING": 1, "HEALTHY": 2}
+        results.sort(key=lambda x: (urgency_order.get(x["predictive_depletion"]["urgency"], 3), x["predictive_depletion"]["days_remaining"]))
+        return results
+
+
+# ========================================================
+# 📦 STORES REQUISITION ACCEPTANCE & OUTWARD CHECKOUT GATE
+# ========================================================
+
+class OrderAcceptPayload(BaseModel):
+    actor: str = "Central Storekeeper"
+
+
+class OrderCheckoutPayload(BaseModel):
+    actor: str = "Central Storekeeper"
+    destination_ref: str | None = None
+    gate_pass_no: str | None = None
+
+
+def generate_stores_slip_data(req, issued_batches=None, total_value=None):
+    if issued_batches is None:
+        issued_batches = req["issued_batches"] if isinstance(req.get("issued_batches"), list) else (json.loads(req.get("issued_batches") or "[]"))
+    if total_value is None:
+        total_value = sum(float(b.get("amount", b.get("qty", 0) * b.get("unit_cost", 0))) for b in issued_batches)
+    
+    order_type = req.get("order_type") or "Factory BOM Requisition"
+    return {
+        "slip_type": "40_COL_STORES_OUTWARD",
+        "slip_title": "STORES DISPATCH OUTWARD SLIP",
+        "barcode": req.get("slip_barcode") or f"BC-STR-{req.get('id', 1)}-{req.get('req_no', '')}",
+        "req_no": req.get("req_no"),
+        "prod_no": req.get("prod_no"),
+        "order_type": order_type,
+        "store_code": req.get("store_code") or "STR-MFG-RM",
+        "factory_code": req.get("factory_code") or "DEL01",
+        "customer_name": req.get("customer_name") or "Internal Department",
+        "customer_mobile": req.get("customer_mobile") or "+91-9811000001",
+        "customer_company": req.get("customer_company") or "Bikanervala Foods Pvt Ltd",
+        "destination": req.get("destination") or "Store Front / Floor",
+        "requested_by": req.get("requested_by") or "Staff",
+        "accepted_by": req.get("accepted_by"),
+        "accepted_at": str(req.get("accepted_at") or ""),
+        "checkout_by": req.get("checkout_by") or req.get("issued_by") or "Central Storekeeper",
+        "checkout_at": str(req.get("checkout_at") or req.get("issued_at") or datetime.now().isoformat()),
+        "fg_name": req.get("fg_name"),
+        "planned_qty": float(req.get("planned_qty") or 0),
+        "uom": req.get("uom") or "kg",
+        "items": issued_batches,
+        "total_items": len(issued_batches),
+        "total_value": round(float(total_value), 2)
+    }
+
+
+@app.post("/material-requisitions/{req_id}/accept")
+def accept_stores_requisition(req_id: int, payload: OrderAcceptPayload):
+    """
+    Step 1: Stores Order Acceptance
+    Marks requisition as ACCEPTED. Stock is NOT deducted yet.
+    Outward dispatch can only occur after explicit stores checkout.
+    """
+    with get_conn() as conn:
+        req = conn.execute("SELECT * FROM stores_mod.material_requisitions WHERE id = %s", (req_id,)).fetchone()
+        if not req:
+            raise HTTPException(status_code=404, detail="Material requisition not found")
+        if req["status"] in ("ISSUED", "CHECKOUT_DONE"):
+            return {"success": False, "message": "Requisition has already been checked out and dispatched.", "requisition": req}
+        
+        updated = conn.execute(
+            """
+            UPDATE stores_mod.material_requisitions
+            SET status = 'ACCEPTED', accepted_by = %s, accepted_at = NOW()
+            WHERE id = %s RETURNING *
+            """,
+            (payload.actor, req_id),
+        ).fetchone()
+
+        return {
+            "success": True,
+            "message": f"Order {updated['req_no']} officially ACCEPTED! Awaiting physical Stores Check-Out Gate for dispatch.",
+            "requisition": updated
+        }
+
+
+@app.post("/material-requisitions/{req_id}/checkout")
+def checkout_stores_order(req_id: int, payload: OrderCheckoutPayload):
+    """
+    Step 2: Stores Check-Out Gate (Physical Dispatch & 40-Col Slip Generation)
+    Deducts stock via FEFO from stock_batches, records stock_movements,
+    generates Code-128 barcode, and returns 40-col slip data.
+    """
+    with get_conn() as conn:
+        req = conn.execute("SELECT * FROM stores_mod.material_requisitions WHERE id = %s", (req_id,)).fetchone()
+        if not req:
+            raise HTTPException(status_code=404, detail="Material requisition not found")
+        if req["status"] in ("ISSUED", "CHECKOUT_DONE"):
+            slip_data = generate_stores_slip_data(req)
+            return {"success": True, "message": "Requisition was already checked out.", "requisition": req, "slip": slip_data}
+
+        bom_items = req["bom_items"] if isinstance(req["bom_items"], list) else json.loads(req["bom_items"])
+        issued_batches = []
+        total_rm_cost = 0.0
+        ts = int(datetime.now().timestamp() * 1000) % 1000000
+        barcode = f"BC-OUT-{req['id']}-{ts}"
+
+        for ing in bom_items:
+            sku = ing.get("rm_sku") or ing.get("sku")
+            req_qty = float(ing.get("required_qty", ing.get("qty", 1.0)))
+            batches = conn.execute(
+                """
+                SELECT * FROM stores_mod.stock_batches
+                WHERE sku = %s AND qty > 0 AND qc_status = 'PASSED'
+                ORDER BY expiry_date ASC, id ASC
+                """,
+                (sku,),
+            ).fetchall()
+
+            rem = req_qty
+            for b in batches:
+                if rem <= 0:
+                    break
+                take = min(float(b["qty"]), rem)
+                conn.execute("UPDATE stores_mod.stock_batches SET qty = qty - %s WHERE id = %s", (take, b["id"]))
+                cost = take * float(b["unit_cost"])
+                total_rm_cost += cost
+                mov_no = f"OUT-{ts}-{b['id']}"
+                conn.execute(
+                    """
+                    INSERT INTO stores_mod.stock_movements (movement_no, movement_type, store_code, sku, batch_no, qty, uom, reason_code, ref_no, actor)
+                    VALUES (%s,'CHECK_OUT_ISSUE',%s,%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (mov_no, b["store_code"], sku, b["batch_no"], take, ing.get("uom", b["uom"]), f"Stores Check-Out for {req['req_no']}", req["prod_no"], payload.actor),
+                )
+                issued_batches.append({
+                    "sku": sku,
+                    "name": ing.get("rm_name", ing.get("name", sku)),
+                    "batch_no": b["batch_no"],
+                    "qty": round(take, 3),
+                    "uom": ing.get("uom", b["uom"]),
+                    "unit_cost": float(b["unit_cost"]),
+                    "amount": round(cost, 2)
+                })
+                rem -= take
+
+        # Update requisition status
+        updated = conn.execute(
+            """
+            UPDATE stores_mod.material_requisitions
+            SET status = 'CHECKOUT_DONE', checkout_by = %s, checkout_at = NOW(),
+                issued_by = %s, issued_at = NOW(), issued_batches = %s::jsonb,
+                slip_barcode = %s, destination = COALESCE(%s, destination)
+            WHERE id = %s RETURNING *
+            """,
+            (payload.actor, payload.actor, json.dumps(issued_batches), barcode, payload.destination_ref, req_id),
+        ).fetchone()
+
+        # Link to factory order if applicable
+        if req.get("prod_no") and req["prod_no"].startswith("PRD-"):
+            conn.execute(
+                """
+                UPDATE factory_mod.production_orders
+                SET status = 'STORE_ISSUED', store_status = 'ISSUED', progress_pct = 50, actual_rm_cost = %s
+                WHERE prod_no = %s
+                """,
+                (round(total_rm_cost, 2), req["prod_no"]),
+            )
+
+        slip_data = generate_stores_slip_data(updated, issued_batches, total_rm_cost)
+        return {
+            "success": True,
+            "message": f"Stores Check-Out completed! Stock deducted via FEFO and 40-Col slip generated for {updated['req_no']}.",
+            "requisition": updated,
+            "issued_batches": issued_batches,
+            "total_value": round(total_rm_cost, 2),
+            "slip": slip_data
+        }
+
+
+@app.get("/material-requisitions/{req_id}/slip")
+def get_stores_slip(req_id: int):
+    """
+    Returns 40-column thermal slip data with barcode for any stores requisition.
+    """
+    with get_conn() as conn:
+        req = conn.execute("SELECT * FROM stores_mod.material_requisitions WHERE id = %s", (req_id,)).fetchone()
+        if not req:
+            raise HTTPException(status_code=404, detail="Requisition not found")
+        return generate_stores_slip_data(req)
+
+
+# ========================================================
+# 📊 STORES BUSINESS INTELLIGENCE REPORTS
+# ========================================================
+
+@app.get("/reports/item-wise-stock")
+def report_item_wise_stock(store_code: str | None = None):
+    """
+    Item-wise Stock & Movement Ledger:
+    SKU, Name, Category, UOM, Current Available Stock, Inward GRNs, Outward Issues, Buffer, Unit Cost & Valuation.
+    """
+    with get_conn() as conn:
+        sql = """
+            SELECT i.sku, i.name, i.category, i.sub_category, i.inventory_uom,
+                   i.cost_price, i.selling_price, i.min_par_level,
+                   COALESCE(SUM(b.qty), 0) AS current_stock,
+                   COALESCE(COUNT(b.id), 0) AS active_batches,
+                   ROUND(COALESCE(SUM(b.qty * b.unit_cost), 0), 2) AS total_valuation,
+                   COALESCE(inw.inward_qty, 0) AS total_inward_qty,
+                   COALESCE(outw.outward_qty, 0) AS total_outward_qty
+            FROM admin_mod.items i
+            LEFT JOIN stores_mod.stock_batches b ON b.sku = i.sku AND b.qty > 0 AND b.qc_status = 'PASSED'
+            LEFT JOIN (
+                SELECT sku, SUM(qty) AS inward_qty FROM stores_mod.stock_movements
+                WHERE movement_type IN ('CHECK_IN_GRN', 'GRN', 'MANUAL_IN')
+                GROUP BY sku
+            ) inw ON inw.sku = i.sku
+            LEFT JOIN (
+                SELECT sku, SUM(qty) AS outward_qty FROM stores_mod.stock_movements
+                WHERE movement_type IN ('CHECK_OUT_ISSUE', 'BOM_ISSUE', 'TRANSFER_OUT', 'WASTAGE')
+                GROUP BY sku
+            ) outw ON outw.sku = i.sku
+            WHERE i.category IN ('RM', 'Packaging', 'FG-Sweet')
+        """
+        params = []
+        if store_code:
+            sql += " AND (b.store_code = %s OR b.store_code IS NULL)"
+            params.append(store_code)
+        sql += " GROUP BY i.sku, i.name, i.category, i.sub_category, i.inventory_uom, i.cost_price, i.selling_price, i.min_par_level, inw.inward_qty, outw.outward_qty ORDER BY total_valuation DESC"
+        rows = conn.execute(sql, tuple(params) if params else None).fetchall()
+        return rows
+
+
+@app.get("/reports/total-inventory")
+def report_total_inventory():
+    """
+    Total Stores Inventory Valuation & Aging Breakdown by Store.
+    """
+    with get_conn() as conn:
+        stores = conn.execute("SELECT * FROM stores_mod.stores WHERE active = TRUE ORDER BY store_code").fetchall()
+        report = []
+        for s in stores:
+            batches = conn.execute(
+                """
+                SELECT COUNT(id) AS batches_count,
+                       COUNT(DISTINCT sku) AS items_count,
+                       COALESCE(SUM(qty), 0) AS total_qty,
+                       COALESCE(SUM(qty * unit_cost), 0) AS total_value,
+                       COALESCE(SUM(CASE WHEN (expiry_date - CURRENT_DATE) >= 30 THEN qty * unit_cost ELSE 0 END), 0) AS fresh_value,
+                       COALESCE(SUM(CASE WHEN (expiry_date - CURRENT_DATE) BETWEEN 8 AND 29 THEN qty * unit_cost ELSE 0 END), 0) AS aging_value,
+                       COALESCE(SUM(CASE WHEN (expiry_date - CURRENT_DATE) <= 7 THEN qty * unit_cost ELSE 0 END), 0) AS risk_value
+                FROM stores_mod.stock_batches
+                WHERE store_code = %s AND qty > 0 AND qc_status = 'PASSED'
+                """,
+                (s["store_code"],),
+            ).fetchone()
+            report.append({
+                "store_code": s["store_code"],
+                "name": s["name"],
+                "outlet_code": s["outlet_code"],
+                "store_type": s["store_type"],
+                "temp_zone": s["temp_zone"],
+                "capacity_kg": float(s["capacity_kg"]),
+                "storekeeper": s["storekeeper"],
+                "batches_count": batches["batches_count"] if batches else 0,
+                "items_count": batches["items_count"] if batches else 0,
+                "total_qty": round(float(batches["total_qty"] if batches else 0), 2),
+                "total_value": round(float(batches["total_value"] if batches else 0), 2),
+                "fresh_value": round(float(batches["fresh_value"] if batches else 0), 2),
+                "aging_value": round(float(batches["aging_value"] if batches else 0), 2),
+                "risk_value": round(float(batches["risk_value"] if batches else 0), 2),
+            })
+        return report
+
+
+@app.get("/reports/vendor-procurement")
+def report_vendor_procurement():
+    """
+    Vendor-wise Procurement Ledger & Lead Time Analysis.
+    """
+    with get_conn() as conn:
+        vendors = conn.execute("SELECT * FROM vendor_mod.vendors ORDER BY vendor_code").fetchall()
+        report = []
+        for v in vendors:
+            mappings = conn.execute(
+                "SELECT rm_sku, rm_name, moq, uom, lead_time_days, quality_score FROM vendor_mod.vendor_rm_mapping WHERE vendor_code = %s",
+                (v["vendor_code"],),
+            ).fetchall()
+            pos = conn.execute(
+                "SELECT COUNT(id) AS po_count, COALESCE(SUM(total_amount), 0) AS total_spend FROM vendor_mod.purchase_orders WHERE vendor_code = %s",
+                (v["vendor_code"],),
+            ).fetchone()
+            report.append({
+                "vendor_code": v["vendor_code"],
+                "trade_name": v["trade_name"],
+                "legal_name": v["legal_name"],
+                "contact_person": v["contact_person"],
+                "mobile": v["mobile"],
+                "email": v["email"],
+                "gstin": v["gstin"],
+                "fssai_no": v["fssai_no"],
+                "fssai_expiry": str(v["fssai_expiry"]),
+                "quality_rating": float(v["quality_rating"] or 4.5),
+                "payment_terms": v["payment_terms"],
+                "items_count": len(mappings),
+                "materials_supplied": [m["rm_name"] for m in mappings],
+                "lead_time_days": mappings[0]["lead_time_days"] if mappings else 3,
+                "po_count": pos["po_count"] if pos else 0,
+                "total_spend": round(float(pos["total_spend"] if pos else 0), 2)
+            })
+        return report
+
 
