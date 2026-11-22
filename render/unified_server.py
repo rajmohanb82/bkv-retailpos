@@ -118,15 +118,20 @@ if FRONTEND_DIST:
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # In Render, there is only one HTTPS port. Intercept any click pointing to localhost:8288 and redirect to /kiosk
+        # In Render, there is only one HTTPS port. Intercept any click pointing to 8288/8289 and redirect to /kiosk or /retail-pos
         kiosk_shim = """
         <script>
         (function() {
           document.addEventListener('click', function(e) {
             var el = e.target.closest('a');
-            if (el && el.href && (el.href.indexOf(':8288') !== -1 || el.href.indexOf('8288') !== -1)) {
-              e.preventDefault();
-              window.open(window.location.origin + '/kiosk', '_blank');
+            if (el && el.href) {
+              if (el.href.indexOf(':8288') !== -1) {
+                e.preventDefault();
+                window.open(window.location.origin + '/kiosk', '_blank');
+              } else if (el.href.indexOf(':8289') !== -1) {
+                e.preventDefault();
+                window.open(window.location.origin + '/retail-pos', '_blank');
+              }
             }
           }, true);
         })();
