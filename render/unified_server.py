@@ -144,6 +144,14 @@ if FRONTEND_DIST:
     def serve_kiosk():
         return HTMLResponse(content=cached_index_html, status_code=200)
 
+    @app.get("/retail-pos")
+    @app.get("/pos/retail")
+    @app.get("/pos/standalone")
+    @app.get("/pos/customer-display")
+    @app.get("/cfd")
+    def serve_pos_routes():
+        return HTMLResponse(content=cached_index_html, status_code=200)
+
     @app.get("/{full_path:path}")
     def serve_spa(full_path: str):
         # If static file exists directly (e.g. bikanervala-customer-logo.png, favicon.svg)

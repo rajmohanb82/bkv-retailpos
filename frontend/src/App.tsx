@@ -34,6 +34,7 @@ import { AuthUser, LoginScreen } from "./components/LoginScreen";
 import { AggregatorNotificationBar } from "./components/AggregatorNotificationBar";
 import { ExecutiveDashboard } from "./modules/ExecutiveDashboard";
 import { RetailPos } from "./modules/RetailPos";
+import { RetailCustomerDisplay } from "./components/RetailCustomerDisplay";
 import { RestaurantPos } from "./modules/RestaurantPos";
 import { RestaurantOrderTaking } from "./modules/RestaurantOrderTaking";
 import { RestaurantKiosk } from "./modules/RestaurantKiosk";
@@ -313,6 +314,50 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#FAF8F5] dark:bg-[#070B14]">
         <PortraitKioskExpress isStandalone={true} activeOutlet={activeOutlet || "DEL01"} />
+      </div>
+    );
+  }
+
+  // Dedicated Customer Facing Display (CFD) Mode
+  const isCustomerDisplayMode =
+    typeof window !== "undefined" &&
+    (window.location.search.includes("display=customer") ||
+      window.location.search.includes("view=cfd") ||
+      window.location.pathname === "/cfd" ||
+      window.location.pathname.startsWith("/pos/customer-display"));
+
+  if (isCustomerDisplayMode) {
+    return <RetailCustomerDisplay />;
+  }
+
+  // Dedicated Port 8289 or Standalone Retail POS Detection
+  const isRetailPosStandalone =
+    typeof window !== "undefined" &&
+    (window.location.port === "8289" ||
+      window.location.search.includes("pos=standalone") ||
+      window.location.search.includes("view=retail-pos") ||
+      window.location.pathname === "/retail-pos" ||
+      window.location.pathname.startsWith("/pos/retail") ||
+      window.location.pathname.startsWith("/pos/standalone"));
+
+  if (isRetailPosStandalone) {
+    if (!session) {
+      return (
+        <LoginScreen
+          theme={theme}
+          onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      );
+    }
+    return (
+      <div className="min-h-screen bg-[#F7F6F2] dark:bg-[#070B14] text-slate-900 dark:text-slate-100">
+        <RetailPos
+          activeOutlet={activeOutlet}
+          outlets={outlets}
+          actorName={session.user.full_name}
+          isStandalone={true}
+        />
       </div>
     );
   }

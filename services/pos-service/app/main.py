@@ -2,12 +2,55 @@ import json
 import random
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from fastapi import HTTPException
+from fastapi import HTTPException, Request, Query
 from pydantic import BaseModel
 from common.app_factory import create_service_app
 from common.db import get_conn, compute_cart_hash
 
 app = create_service_app("Retail POS & Shop Manager Service")
+
+
+@app.on_event("startup")
+def ensure_pos_schema():
+    try:
+        with get_conn() as conn:
+            conn.execute("""
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_id VARCHAR(40) DEFAULT 'CNT-01';
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';
+
+                CREATE TABLE IF NOT EXISTS pos_mod.cash_counters (
+                    id SERIAL PRIMARY KEY,
+                    counter_id VARCHAR(40) UNIQUE NOT NULL,
+                    counter_name VARCHAR(80) NOT NULL,
+                    outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+                    ip_address VARCHAR(50) DEFAULT '127.0.0.1',
+                    cashier_id VARCHAR(40) NOT NULL DEFAULT 'CSH-DEL01-001',
+                    cashier_name VARCHAR(100) NOT NULL DEFAULT 'Priya Sharma',
+                    printer_type VARCHAR(40) DEFAULT '40_COL_THERMAL',
+                    printer_ip VARCHAR(60) DEFAULT '192.168.1.201',
+                    printer_name VARCHAR(80) DEFAULT 'EPSON TM-T82II Thermal Receipt',
+                    paper_width_mm INT DEFAULT 58,
+                    is_dual_screen_enabled BOOLEAN DEFAULT TRUE,
+                    status VARCHAR(20) DEFAULT 'ACTIVE',
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+
+                INSERT INTO pos_mod.cash_counters 
+                (counter_id, counter_name, outlet_code, ip_address, cashier_id, cashier_name, printer_type, printer_ip, printer_name, paper_width_mm, is_dual_screen_enabled)
+                VALUES
+                ('CNT-DEL01-01', 'Mithai Counter 1', 'DEL01', '127.0.0.1', 'CSH-DEL01-001', 'Priya Sharma', '40_COL_THERMAL', '192.168.1.201', 'EPSON TM-T82II Thermal Receipt (40-Col)', 58, true),
+                ('CNT-DEL01-02', 'Express Sweets & Namkeen Desk', 'DEL01', '127.0.0.1', 'CSH-DEL01-002', 'Vikram Sethi', '40_COL_THERMAL', '192.168.1.202', 'TVS RP-3150 Star Thermal (80mm)', 80, true),
+                ('CNT-GUR02-01', 'Front Mithai Counter', 'GUR02', '127.0.0.1', 'CSH-GUR02-001', 'Arjun Negi', '40_COL_THERMAL', '192.168.2.101', 'Bixolon SRP-330II POS Receipt', 58, true),
+                ('CNT-JAI03-01', 'Main Mithai Cash Desk', 'JAI03', '127.0.0.1', 'CSH-JAI03-001', 'Kavita Rathore', '40_COL_THERMAL', '192.168.3.101', 'Citizen CT-S310II Thermal', 58, true),
+                ('CNT-NOI04-01', 'Bistro Sweets Counter', 'NOI04', '127.0.0.1', 'CSH-NOI04-001', 'Sanjay Verma', '40_COL_THERMAL', '192.168.4.101', 'Sewoo LK-T210 POS Receipt', 58, true)
+                ON CONFLICT (counter_id) DO NOTHING;
+            """)
+    except Exception as e:
+        print(f"[POS Service] Warning on ensure_pos_schema: {e}")
+
 
 
 def calculate_totals(items: list[dict], discount_amount: float = 0.0) -> dict:
@@ -63,6 +106,11 @@ class EstimateCreate(BaseModel):
     estimate_staff: str = "Counter Staff 1"
     customer_name: Optional[str] = None
     customer_mobile: Optional[str] = None
+    counter_id: Optional[str] = "CNT-01"
+    counter_name: Optional[str] = "Mithai Counter 1"
+    cashier_id: Optional[str] = None
+    cashier_name: Optional[str] = None
+    terminal_ip: Optional[str] = None
 
 
 class CartUpdate(BaseModel):
@@ -89,6 +137,26 @@ class OtpVerifyPayload(BaseModel):
 class PaymentPayload(BaseModel):
     payment_splits: list[dict]
     cashier_id: str = "Priya Sharma"
+    cashier_name: Optional[str] = None
+    counter_id: Optional[str] = None
+    counter_name: Optional[str] = None
+    terminal_ip: Optional[str] = None
+
+
+class CashCounterPayload(BaseModel):
+    counter_id: str
+    counter_name: str
+    outlet_code: str = "DEL01"
+    ip_address: str = "127.0.0.1"
+    cashier_id: str = "CSH-DEL01-001"
+    cashier_name: str = "Priya Sharma"
+    printer_type: str = "40_COL_THERMAL"
+    printer_ip: str = "192.168.1.201"
+    printer_name: str = "EPSON TM-T82II Thermal Receipt"
+    paper_width_mm: int = 58
+    is_dual_screen_enabled: bool = True
+    status: str = "ACTIVE"
+
 
 
 class DeliveryScanPayload(BaseModel):
@@ -268,14 +336,16 @@ def create_estimate(payload: EstimateCreate):
         return conn.execute(
             """
             INSERT INTO pos_mod.pos_orders
-            (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, estimate_staff, customer_name, customer_mobile)
-            VALUES (%s,%s,%s,'ESTIMATE_GENERATED',%s::jsonb,%s,0,%s,%s,%s,%s,%s,%s,%s) RETURNING *
+            (estimate_no, outlet_code, mode, status, items, subtotal, discount_amount, cart_hash, cgst, sgst, grand_total, estimate_staff, customer_name, customer_mobile, counter_id, counter_name, cashier_name, terminal_ip)
+            VALUES (%s,%s,%s,'ESTIMATE_GENERATED',%s::jsonb,%s,0,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *
             """,
             (
                 est_no, payload.outlet_code, payload.mode, json.dumps(payload.items),
                 totals["subtotal"], c_hash, totals["cgst"], totals["sgst"],
                 totals["grand_total"], payload.estimate_staff,
                 payload.customer_name, payload.customer_mobile,
+                payload.counter_id or "CNT-01", payload.counter_name or "Mithai Counter 1",
+                payload.cashier_name or payload.estimate_staff, payload.terminal_ip or "127.0.0.1",
             ),
         ).fetchone()
 
@@ -455,16 +525,23 @@ def collect_payment(estimate_no: str, payload: PaymentPayload):
         is_direct = order["mode"] == "DIRECT"
         next_status = "DELIVERED_CLOSED" if is_direct else "PAID_PENDING_DELIVERY"
 
+        c_name = payload.cashier_name or payload.cashier_id
+        cnt_id = payload.counter_id or order.get("counter_id") or "CNT-01"
+        cnt_name = payload.counter_name or order.get("counter_name") or "Mithai Counter 1"
+        t_ip = payload.terminal_ip or order.get("terminal_ip") or "127.0.0.1"
+
         updated = conn.execute(
             """
             UPDATE pos_mod.pos_orders
             SET invoice_no = %s, status = %s, payment_splits = %s::jsonb, cashier_id = %s,
+                cashier_name = %s, counter_id = %s, counter_name = %s, terminal_ip = %s,
                 paid_at = NOW(), delivered_at = CASE WHEN %s THEN NOW() ELSE NULL END,
                 delivery_staff = CASE WHEN %s THEN %s ELSE NULL END
             WHERE estimate_no = %s RETURNING *
             """,
             (
                 inv_no, next_status, json.dumps(payload.payment_splits), payload.cashier_id,
+                c_name, cnt_id, cnt_name, t_ip,
                 is_direct, is_direct, payload.cashier_id, estimate_no,
             ),
         ).fetchone()
@@ -1175,4 +1252,254 @@ def cashier_eod_report(
             "drawer_reconciliation": drawer_reconciliation,
             "available_cashiers": available_cashiers,
         }
+
+
+# ==============================================================================
+# CASH COUNTER CONFIGURATION & CLIENT IP DETECTION
+# ==============================================================================
+
+@app.get("/client-ip")
+def get_client_ip(request: Request):
+    """Detect the local workstation IP address for cashier counter alignment."""
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or request.headers.get("x-real-ip")
+        or (request.client.host if request.client else "127.0.0.1")
+    )
+    if client_ip in ("::1", "127.0.0.1", "localhost"):
+        client_ip = "127.0.0.1"
+    return {"client_ip": client_ip}
+
+
+@app.get("/counters")
+def list_cash_counters(outlet_code: Optional[str] = None):
+    with get_conn() as conn:
+        q = "SELECT * FROM pos_mod.cash_counters WHERE 1=1"
+        params = []
+        if outlet_code and outlet_code.upper() != "ALL":
+            q += " AND outlet_code = %s"
+            params.append(outlet_code.upper())
+        q += " ORDER BY id ASC"
+        return conn.execute(q, tuple(params)).fetchall()
+
+
+@app.post("/counters")
+def save_cash_counter(payload: CashCounterPayload):
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO pos_mod.cash_counters
+            (counter_id, counter_name, outlet_code, ip_address, cashier_id, cashier_name, printer_type, printer_ip, printer_name, paper_width_mm, is_dual_screen_enabled, status, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (counter_id) DO UPDATE SET
+                counter_name = EXCLUDED.counter_name,
+                outlet_code = EXCLUDED.outlet_code,
+                ip_address = EXCLUDED.ip_address,
+                cashier_id = EXCLUDED.cashier_id,
+                cashier_name = EXCLUDED.cashier_name,
+                printer_type = EXCLUDED.printer_type,
+                printer_ip = EXCLUDED.printer_ip,
+                printer_name = EXCLUDED.printer_name,
+                paper_width_mm = EXCLUDED.paper_width_mm,
+                is_dual_screen_enabled = EXCLUDED.is_dual_screen_enabled,
+                status = EXCLUDED.status,
+                updated_at = NOW()
+            RETURNING *
+            """,
+            (
+                payload.counter_id.upper().strip(), payload.counter_name.strip(), payload.outlet_code.upper(),
+                payload.ip_address.strip(), payload.cashier_id.upper().strip(), payload.cashier_name.strip(),
+                payload.printer_type, payload.printer_ip, payload.printer_name, payload.paper_width_mm,
+                payload.is_dual_screen_enabled, payload.status,
+            ),
+        ).fetchone()
+        return {"success": True, "counter": row}
+
+
+@app.delete("/counters/{counter_id}")
+def delete_cash_counter(counter_id: str):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM pos_mod.cash_counters WHERE counter_id = %s", (counter_id.upper(),))
+        return {"success": True, "message": f"Counter {counter_id} deleted"}
+
+
+@app.post("/counters/generate-cashier-id")
+def generate_cashier_id(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        c = conn.execute("SELECT COUNT(*) AS c FROM pos_mod.cash_counters WHERE outlet_code = %s", (outlet_code.upper(),)).fetchone()["c"] + 1
+        cid = f"CSH-{outlet_code.upper()}-{c:03d}"
+        return {"cashier_id": cid}
+
+
+# ==============================================================================
+# MORE RETAIL REPORTS (ADMIN ONLY)
+# ==============================================================================
+
+@app.get("/reports/register")
+def get_register_reconciliation_report(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT 
+                COALESCE(counter_id, 'CNT-01') AS counter_id,
+                COALESCE(counter_name, 'Mithai Counter 1') AS counter_name,
+                COALESCE(cashier_name, cashier_id, 'Priya Sharma') AS cashier_name,
+                COALESCE(terminal_ip, '127.0.0.1') AS terminal_ip,
+                COUNT(*) AS total_bills,
+                COUNT(CASE WHEN status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED') THEN 1 END) AS paid_bills,
+                SUM(CASE WHEN status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED') THEN grand_total ELSE 0 END) AS total_revenue,
+                SUM(CASE WHEN status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED') THEN discount_amount ELSE 0 END) AS total_discount,
+                SUM(CASE WHEN status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED') THEN (cgst + sgst) ELSE 0 END) AS total_tax
+            FROM pos_mod.pos_orders
+            WHERE outlet_code = %s AND created_at >= CURRENT_DATE
+            GROUP BY counter_id, counter_name, cashier_name, cashier_id, terminal_ip
+            ORDER BY total_revenue DESC
+            """,
+            (outlet_code,),
+        ).fetchall()
+
+        shifts = conn.execute(
+            "SELECT * FROM pos_mod.shifts WHERE outlet_code = %s ORDER BY id DESC LIMIT 5",
+            (outlet_code,),
+        ).fetchall()
+
+        return {"outlet_code": outlet_code, "counters_report": rows, "shifts": shifts}
+
+
+@app.get("/reports/hourly-sales")
+def get_hourly_sales_report(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT 
+                EXTRACT(HOUR FROM created_at)::int AS hour_of_day,
+                COUNT(*) AS bills_count,
+                SUM(grand_total) AS total_sales,
+                ROUND(AVG(grand_total), 2) AS avg_bill_value
+            FROM pos_mod.pos_orders
+            WHERE outlet_code = %s AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED') AND created_at >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY hour_of_day
+            ORDER BY hour_of_day ASC
+            """,
+            (outlet_code,),
+        ).fetchall()
+        return {"outlet_code": outlet_code, "hourly_data": rows}
+
+
+@app.get("/reports/category-performance")
+def get_category_performance_report(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        orders = conn.execute(
+            """
+            SELECT items, grand_total, discount_amount, cgst, sgst 
+            FROM pos_mod.pos_orders 
+            WHERE outlet_code = %s AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+            ORDER BY id DESC LIMIT 300
+            """,
+            (outlet_code,),
+        ).fetchall()
+
+        cat_map = {}
+        for ord in orders:
+            raw_items = ord["items"]
+            if isinstance(raw_items, str):
+                try:
+                    raw_items = json.loads(raw_items)
+                except Exception:
+                    raw_items = []
+            elif not isinstance(raw_items, list):
+                raw_items = []
+
+            for it in raw_items:
+                sku = it.get("sku", "")
+                cat = "FG-Sweet (Milk/Mithai)" if any(k in sku for k in ["RAS", "KAJU", "BESAN", "GUL", "LAD", "BUR"]) else ("Namkeen & Snacks" if any(k in sku for k in ["NAM", "BHUJ", "CHANA", "MATH"]) else ("Chaat & Savouries" if "CHAAT" in sku else "Bakery & Packaged"))
+                qty = float(it.get("qty", 1))
+                line_total = float(it.get("line_total", qty * float(it.get("unit_price", 100))))
+
+                if cat not in cat_map:
+                    cat_map[cat] = {"category": cat, "items_count": 0, "total_qty": 0.0, "total_sales": 0.0, "sample_items": set()}
+                cat_map[cat]["items_count"] += 1
+                cat_map[cat]["total_qty"] = round(cat_map[cat]["total_qty"] + qty, 2)
+                cat_map[cat]["total_sales"] = round(cat_map[cat]["total_sales"] + line_total, 2)
+                cat_map[cat]["sample_items"].add(it.get("name", sku))
+
+        result = []
+        for c, v in cat_map.items():
+            result.append({
+                "category": v["category"],
+                "items_count": v["items_count"],
+                "total_qty": v["total_qty"],
+                "total_sales": v["total_sales"],
+                "sample_items": list(v["sample_items"])[:4],
+            })
+        result.sort(key=lambda x: x["total_sales"], reverse=True)
+        return {"outlet_code": outlet_code, "categories": result}
+
+
+@app.get("/reports/cashier-productivity")
+def get_cashier_productivity_report(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT 
+                COALESCE(cashier_name, cashier_id, estimate_staff, 'Cashier Staff') AS cashier_name,
+                COALESCE(counter_name, 'Counter 1') AS counter_name,
+                COUNT(*) AS total_bills,
+                SUM(grand_total) AS total_revenue,
+                SUM(discount_amount) AS total_discounts,
+                ROUND(AVG(grand_total), 2) AS avg_ticket_size,
+                MIN(created_at) AS first_bill_time,
+                MAX(created_at) AS last_bill_time
+            FROM pos_mod.pos_orders
+            WHERE outlet_code = %s AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+            GROUP BY cashier_name, counter_name
+            ORDER BY total_revenue DESC
+            """,
+            (outlet_code,),
+        ).fetchall()
+        return {"outlet_code": outlet_code, "cashiers": rows}
+
+
+@app.get("/reports/gst-summary")
+def get_gst_summary_report(outlet_code: str = "DEL01"):
+    with get_conn() as conn:
+        orders = conn.execute(
+            """
+            SELECT items, subtotal, discount_amount, cgst, sgst, grand_total
+            FROM pos_mod.pos_orders 
+            WHERE outlet_code = %s AND status IN ('PAID_PENDING_DELIVERY', 'DELIVERED_CLOSED')
+            ORDER BY id DESC LIMIT 500
+            """,
+            (outlet_code,),
+        ).fetchall()
+
+        slabs = {
+            "5%": {"rate": "5% (Mithai & Traditional Food)", "taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "total_tax": 0.0},
+            "12%": {"rate": "12% (Packaged Namkeen & Dry Fruits)", "taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "total_tax": 0.0},
+            "18%": {"rate": "18% (Gift Hampers & Aerated Beverages)", "taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "total_tax": 0.0},
+        }
+
+        for o in orders:
+            raw_items = o["items"]
+            if isinstance(raw_items, str):
+                try:
+                    raw_items = json.loads(raw_items)
+                except Exception:
+                    raw_items = []
+            elif not isinstance(raw_items, list):
+                raw_items = []
+
+            for it in raw_items:
+                pct = float(it.get("gst_pct", 5.0))
+                k = f"{int(pct)}%" if f"{int(pct)}%" in slabs else "5%"
+                amt = float(it.get("line_total", 0.0))
+                taxable = round(amt / (1 + pct / 100.0), 2)
+                tax = round(amt - taxable, 2)
+                slabs[k]["taxable"] = round(slabs[k]["taxable"] + taxable, 2)
+                slabs[k]["cgst"] = round(slabs[k]["cgst"] + (tax / 2.0), 2)
+                slabs[k]["sgst"] = round(slabs[k]["sgst"] + (tax / 2.0), 2)
+                slabs[k]["total_tax"] = round(slabs[k]["total_tax"] + tax, 2)
+
+        return {"outlet_code": outlet_code, "slabs": list(slabs.values())}
+
 

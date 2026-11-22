@@ -94,10 +94,19 @@ export const ThermalSlip: React.FC<ThermalSlipProps> = ({ order, outlet }) => {
           )}
         </div>
 
-        <div className="flex justify-between text-[10px] mb-2">
+        <div className="flex justify-between text-[10px] mb-1">
           <span>{isPaid ? `Inv: ${order.invoice_no}` : `Est: ${order.estimate_no}`}</span>
           <span>Out: {order.outlet_code}</span>
         </div>
+        <div className="flex justify-between text-[9.5px] text-slate-700 font-semibold mb-1">
+          <span>Counter: {order.counter_name || order.counter_id || "CNT-01 (Mithai 1)"}</span>
+          <span>Cashier: {order.cashier_name || order.cashier_id || order.estimate_staff || "CSH-001"}</span>
+        </div>
+        {order.terminal_ip && (
+          <div className="text-[9px] text-slate-500 mb-1.5 text-right font-mono">
+            Terminal IP: {order.terminal_ip}
+          </div>
+        )}
 
         <div className="border-y border-dashed border-slate-400 py-1.5 mb-2">
           <div className="flex justify-between font-bold text-[10px] border-b border-dotted border-slate-300 pb-1 mb-1">

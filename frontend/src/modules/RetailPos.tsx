@@ -22,6 +22,19 @@ import {
   CornerDownLeft,
   User,
   Phone,
+  Monitor,
+  ExternalLink,
+  Sliders,
+  Store,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  FileSpreadsheet,
+  Layers,
+  Settings,
+  Sparkles,
+  QrCode,
+  Check,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
@@ -29,17 +42,23 @@ import { ThermalSlip } from "../components/ThermalSlip";
 import { LowStockBanner, LowStockAlertItem } from "../components/LowStockBanner";
 import { CashierEodReport } from "../components/CashierEodReport";
 import { kickCashDrawer, print40ColumnThermalSlip } from "../utils/posHardware";
+import { AdminPosHardwareModal } from "../components/AdminPosHardwareModal";
+import { AdminCashCounterModal, CashCounter } from "../components/AdminCashCounterModal";
+import { AdminRetailReportsModal } from "../components/AdminRetailReportsModal";
+import { DualScreenPayload } from "../components/RetailCustomerDisplay";
 
 interface RetailPosProps {
   activeOutlet: string;
   outlets: Outlet[];
   actorName?: string;
+  isStandalone?: boolean;
 }
 
 export const RetailPos: React.FC<RetailPosProps> = ({
   activeOutlet,
   outlets,
   actorName = "Cashier",
+  isStandalone = false,
 }) => {
   const [counterTab, setCounterTab] = useState<
     "estimate" | "cashier" | "delivery" | "stock" | "eod"
@@ -59,6 +78,14 @@ export const RetailPos: React.FC<RetailPosProps> = ({
   const POS_PAGE_SIZE = 10;
   const [stagedEntry, setStagedEntry] = useState<{ item: ItemSku; qty: number } | null>(null);
   const [doubleEnterArmed, setDoubleEnterArmed] = useState(false);
+
+  // Active Terminal & Cash Counter State
+  const [activeCounter, setActiveCounter] = useState<CashCounter | null>(null);
+  const [showCounterModal, setShowCounterModal] = useState(false);
+  const [showHardwareModal, setShowHardwareModal] = useState(false);
+  const [showReportsModal, setShowReportsModal] = useState(false);
+  const [heldCarts, setHeldCarts] = useState<any[]>([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Customer details for estimate & order
   const [customerMobile, setCustomerMobile] = useState("");
@@ -140,6 +167,156 @@ export const RetailPos: React.FC<RetailPosProps> = ({
   useEffect(() => {
     loadData();
   }, [activeOutlet]);
+
+  // Active Counter terminal profile loading
+  useEffect(() => {
+    try {
+      const storedCounter = localStorage.getItem("annavya_pos_active_counter");
+      if (storedCounter) {
+        const parsed = JSON.parse(storedCounter);
+        if (parsed.outlet_code === activeOutlet) {
+          setActiveCounter(parsed);
+          return;
+        }
+      }
+      apiFetch<CashCounter[]>(`/api/pos/counters?outlet_code=${activeOutlet}`).then((list) => {
+        if (list && list.length > 0) {
+          setActiveCounter(list[0]);
+          localStorage.setItem("annavya_pos_active_counter", JSON.stringify(list[0]));
+        }
+      });
+      const storedHeld = localStorage.getItem("annavya_pos_held_carts");
+      if (storedHeld) {
+        setHeldCarts(JSON.parse(storedHeld));
+      }
+    } catch (e) {
+      console.warn("Error loading counter or held carts:", e);
+    }
+  }, [activeOutlet]);
+
+  // Dual Screen / CFD Broadcast Helper
+  const broadcastToCfd = (override?: Partial<DualScreenPayload>) => {
+    const subtotal = cart.reduce((s, c) => s + Number(c.line_total || 0), 0);
+    const gst = cart.reduce((s, c) => s + (Number(c.line_total || 0) * (Number(c.gst_pct || 5) / 100)), 0);
+    const grandTotal = Math.round((subtotal + gst) * 100) / 100;
+
+    const payload: DualScreenPayload = {
+      outletCode: activeOutlet,
+      outletName: outletObj?.trade_name || "Bikanervala Heritage Sweets",
+      counterId: activeCounter?.counter_id || "CNT-DEL01-01",
+      counterName: activeCounter?.counter_name || "Mithai Counter 1",
+      cashierId: activeCounter?.cashier_id || "CSH-DEL01-001",
+      cashierName: activeCounter?.cashier_name || actorName || "Priya Sharma",
+      terminalIp: activeCounter?.ip_address || "127.0.0.1",
+      items: cart,
+      subtotal,
+      discountAmount: 0,
+      cgst: Math.round((gst / 2) * 100) / 100,
+      sgst: Math.round((gst / 2) * 100) / 100,
+      grandTotal,
+      customerName,
+      customerMobile,
+      paymentMode: payMode,
+      docId: selectedSlip?.invoice_no || selectedSlip?.estimate_no || loadedOrder?.estimate_no,
+      isSettled: selectedSlip?.status === "DELIVERED_CLOSED" || selectedSlip?.status === "PAID_PENDING_DELIVERY",
+      ...override,
+    };
+
+    try {
+      localStorage.setItem("annavya_pos_cfd_state", JSON.stringify(payload));
+      const bc = new BroadcastChannel("annavya_pos_cfd");
+      bc.postMessage(payload);
+      bc.close();
+    } catch (e) {
+      // fallback
+    }
+  };
+
+  // Sync to CFD whenever cart, customer, or payMode changes
+  useEffect(() => {
+    if (counterTab === "estimate") {
+      broadcastToCfd();
+    }
+  }, [cart, customerName, customerMobile, payMode, counterTab, activeCounter]);
+
+  // Sync to CFD whenever loadedOrder changes in cashier tab
+  useEffect(() => {
+    if (counterTab === "cashier" && loadedOrder) {
+      broadcastToCfd({
+        items: loadedOrder.items || [],
+        subtotal: Number(loadedOrder.subtotal || 0),
+        discountAmount: Number(loadedOrder.discount_amount || 0),
+        discountCategory: loadedOrder.discount_category,
+        cgst: Number(loadedOrder.cgst || 0),
+        sgst: Number(loadedOrder.sgst || 0),
+        grandTotal: Number(loadedOrder.grand_total || 0),
+        paymentMode: payMode,
+        docId: loadedOrder.invoice_no || loadedOrder.estimate_no,
+        isSettled: loadedOrder.status === "DELIVERED_CLOSED" || loadedOrder.status === "PAID_PENDING_DELIVERY",
+      });
+    }
+  }, [loadedOrder, payMode, counterTab, activeCounter]);
+
+  const launchCustomerDisplay = () => {
+    broadcastToCfd();
+    const dualWindow = window.open(
+      "/pos/customer-display",
+      "BikanervalaDualScreen",
+      "width=1024,height=768,menubar=no,toolbar=no,location=no,status=no"
+    );
+    if (!dualWindow) {
+      notify("err", "Pop-up blocked! Please allow pop-ups for Dual Screen Customer Display.");
+    } else {
+      notify("ok", "🖥️ Dual Screen (Customer Display) launched! Drag to secondary monitor.");
+    }
+  };
+
+  const handleHoldCart = () => {
+    if (cart.length === 0) {
+      notify("err", "Cart is empty. Nothing to hold.");
+      return;
+    }
+    const newHeld = [
+      ...heldCarts,
+      {
+        id: Date.now(),
+        time: new Date().toLocaleTimeString("en-IN"),
+        customerName: customerName || "Guest",
+        customerMobile,
+        items: cart,
+        total: cart.reduce((s, c) => s + Number(c.line_total || 0), 0),
+      },
+    ];
+    setHeldCarts(newHeld);
+    localStorage.setItem("annavya_pos_held_carts", JSON.stringify(newHeld));
+    setCart([]);
+    setCustomerName("");
+    setCustomerMobile("");
+    notify("ok", `Cart held! (${newHeld.length} carts parked on hold)`);
+  };
+
+  const handleRecallCart = (idx: number) => {
+    const target = heldCarts[idx];
+    if (!target) return;
+    setCart(target.items);
+    setCustomerName(target.customerName !== "Guest" ? target.customerName : "");
+    setCustomerMobile(target.customerMobile || "");
+    const remaining = heldCarts.filter((_, i) => i !== idx);
+    setHeldCarts(remaining);
+    localStorage.setItem("annavya_pos_held_carts", JSON.stringify(remaining));
+    notify("ok", `Cart recalled for ${target.customerName}!`);
+  };
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
+
 
   const addItemToCart = (item: ItemSku) => {
     if (item.is_loose_weighed) {
@@ -227,12 +404,22 @@ export const RetailPos: React.FC<RetailPosProps> = ({
           outlet_code: activeOutlet,
           mode: billingMode,
           items: cart,
-          estimate_staff: actorName,
+          estimate_staff: activeCounter?.cashier_name || actorName,
           customer_name: customerName.trim() || undefined,
           customer_mobile: customerMobile.trim() || undefined,
+          counter_id: activeCounter?.counter_id || "CNT-01",
+          counter_name: activeCounter?.counter_name || "Mithai Counter 1",
+          cashier_id: activeCounter?.cashier_id || "CSH-001",
+          cashier_name: activeCounter?.cashier_name || actorName || "Priya Sharma",
+          terminal_ip: activeCounter?.ip_address || "127.0.0.1",
         }),
       });
       setSelectedSlip(est);
+      broadcastToCfd({
+        items: cart,
+        docId: est.estimate_no,
+        isSettled: false,
+      });
       setCart([]);
       setStagedEntry(null);
       setCustomerName("");
@@ -494,10 +681,24 @@ export const RetailPos: React.FC<RetailPosProps> = ({
     try {
       const paid = await apiFetch(`/api/pos/orders/${loadedOrder.estimate_no}/pay`, {
         method: "POST",
-        body: JSON.stringify({ payment_splits: splits, cashier_id: actorName }),
+        body: JSON.stringify({
+          payment_splits: splits,
+          cashier_id: activeCounter?.cashier_id || actorName,
+          cashier_name: activeCounter?.cashier_name || actorName,
+          counter_id: activeCounter?.counter_id || "CNT-01",
+          counter_name: activeCounter?.counter_name || "Mithai Counter 1",
+          terminal_ip: activeCounter?.ip_address || "127.0.0.1",
+        }),
       });
       setLoadedOrder(paid);
       setSelectedSlip(paid);
+      broadcastToCfd({
+        items: paid.items,
+        docId: paid.invoice_no,
+        isSettled: true,
+        grandTotal: Number(paid.grand_total),
+        paymentMode: payMode,
+      });
       await loadData();
 
       // Simultaneously eject cash drawer AND print 40-column thermal invoice
@@ -603,7 +804,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
         return;
       }
 
-      // Function keys F1-F10 always handled cleanly
+      // Function keys F1-F12 mapped cleanly
       if (e.key === "F1") {
         e.preventDefault();
         setCounterTab("estimate");
@@ -612,49 +813,50 @@ export const RetailPos: React.FC<RetailPosProps> = ({
       } else if (e.key === "F2") {
         e.preventDefault();
         setCounterTab("cashier");
+        setPayMode("Cash");
         setTimeout(() => scanInputRef.current?.focus(), 50);
         return;
       } else if (e.key === "F3") {
         e.preventDefault();
-        setCounterTab("delivery");
-        setTimeout(() => deliveryInputRef.current?.focus(), 50);
+        setCounterTab("cashier");
+        setPayMode("UPI");
         return;
       } else if (e.key === "F4") {
         e.preventDefault();
-        if (counterTab === "estimate") searchInputRef.current?.focus();
-        else if (counterTab === "cashier") scanInputRef.current?.focus();
-        else if (counterTab === "delivery") deliveryInputRef.current?.focus();
+        setCounterTab("cashier");
+        setPayMode("Credit Card");
         return;
       } else if (e.key === "F5") {
         e.preventDefault();
-        if (counterTab === "estimate") {
-          if (stagedEntry) commitStagedToCart();
-          else if (cart.length > 0) generateEstimate();
-        } else if (counterTab === "cashier" && loadedOrder?.status === "ESTIMATE_GENERATED") {
-          collectPayment();
-        } else if (counterTab === "delivery") {
-          const code = deliveryBarcode.trim() || deliveryPreviewOrder?.invoice_no || "";
-          if (code) scanAtDeliveryCounter(code);
-        }
+        if (cart.length > 0) handleHoldCart();
+        else if (heldCarts.length > 0) handleRecallCart(0);
         return;
-      } else if (e.key === "F6" && counterTab === "cashier" && loadedOrder?.status === "ESTIMATE_GENERATED") {
+      } else if (e.key === "F6") {
         e.preventDefault();
-        setShowOtpModal(true);
+        generateEstimate();
         return;
-      } else if (e.key === "F7" && counterTab === "cashier" && loadedOrder?.status === "ESTIMATE_GENERATED") {
+      } else if (e.key === "F7") {
         e.preventDefault();
-        addImpulseBagAtCashier();
+        launchCustomerDisplay();
         return;
       } else if (e.key === "F8") {
         e.preventDefault();
-        handleDrawerKick("Manual Hotkey [F8]");
+        setShowOtpModal(true);
         return;
       } else if (e.key === "F9") {
         e.preventDefault();
-        if (selectedSlip) print40ColumnThermalSlip(selectedSlip, outletObj, hwConfig?.active_printer_driver);
-        else window.print();
+        if (cart.length > 0 && confirm("Clear current cart?")) setCart([]);
         return;
       } else if (e.key === "F10") {
+        e.preventDefault();
+        if (counterTab === "cashier" && loadedOrder) collectPayment();
+        else if (cart.length > 0) generateEstimate();
+        return;
+      } else if (e.key === "F11") {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      } else if (e.key === "F12") {
         e.preventDefault();
         setCounterTab("eod");
         return;
@@ -753,6 +955,122 @@ export const RetailPos: React.FC<RetailPosProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Top Hotkeys Command Bar */}
+      <div className="bg-[#081F5C] text-white rounded-2xl p-2.5 shadow-lg border border-blue-900/40 select-none">
+        <div className="flex items-center justify-between gap-2 overflow-x-auto pb-0.5 custom-scroll">
+          <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+            {[
+              { key: "F1", label: "Search / Scan", color: "bg-amber-400 text-slate-900", action: () => { setCounterTab("estimate"); setTimeout(() => searchInputRef.current?.focus(), 50); } },
+              { key: "F2", label: "Cash Pay", color: "bg-emerald-500 text-white", action: () => { setCounterTab("cashier"); setPayMode("Cash"); setTimeout(() => scanInputRef.current?.focus(), 50); } },
+              { key: "F3", label: "UPI QR Pay", color: "bg-blue-400 text-slate-900", action: () => { setCounterTab("cashier"); setPayMode("UPI"); } },
+              { key: "F4", label: "Card EDC", color: "bg-indigo-400 text-slate-900", action: () => { setCounterTab("cashier"); setPayMode("Credit Card"); } },
+              { key: "F5", label: `Hold/Recall (${heldCarts.length})`, color: "bg-purple-400 text-slate-900", action: () => { if (cart.length > 0) handleHoldCart(); else if (heldCarts.length > 0) handleRecallCart(0); } },
+              { key: "F6", label: "Estimate", color: "bg-sky-400 text-slate-900", action: () => generateEstimate() },
+              { key: "F7", label: "Dual Screen", color: "bg-cyan-400 text-slate-900", action: () => launchCustomerDisplay() },
+              { key: "F8", label: "OTP Discount", color: "bg-rose-400 text-slate-900", action: () => setShowOtpModal(true) },
+              { key: "F9", label: "Clear Cart", color: "bg-red-500 text-white", action: () => { if (cart.length > 0 && confirm("Clear current cart?")) setCart([]); } },
+              { key: "F10", label: "Settle & Print", color: "bg-teal-400 text-slate-900", action: () => { if (counterTab === "cashier" && loadedOrder) collectPayment(); else if (cart.length > 0) generateEstimate(); } },
+              { key: "F11", label: isFullscreen ? "Exit Full" : "Fullscreen", color: "bg-slate-300 text-slate-900", action: toggleFullscreen },
+              { key: "F12", label: "EoD Handover", color: "bg-orange-400 text-slate-900", action: () => setCounterTab("eod") },
+            ].map((hk) => (
+              <button
+                key={hk.key}
+                type="button"
+                onClick={hk.action}
+                className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-bold flex items-center gap-1.5 transition border border-white/10 shrink-0"
+              >
+                <kbd className={`px-1.5 py-0.5 rounded font-mono font-black text-[10px] shadow-sm ${hk.color}`}>
+                  {hk.key}
+                </kbd>
+                <span>{hk.label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] font-mono text-blue-200">Bikanervala POS v2.6</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Terminal Workstation Counter & Admin Controls Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        {/* Counter Details Info Badge */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 flex items-center justify-center text-amber-600">
+            <Store className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                {activeCounter?.counter_name || "Mithai Counter 1"}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-mono font-bold text-[10px]">
+                {activeCounter?.counter_id || "CNT-01"}
+              </span>
+              <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Active Counter</span>
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+              <span>Cashier: <b className="text-slate-700 dark:text-slate-300">{activeCounter?.cashier_name || actorName}</b> ({activeCounter?.cashier_id || "CSH-001"})</span>
+              <span>•</span>
+              <span className="font-mono">IP: <b>{activeCounter?.ip_address || "127.0.0.1"}</b></span>
+            </div>
+          </div>
+        </div>
+
+        {/* Action Controls & Admin Launchers */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={launchCustomerDisplay}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white font-extrabold text-xs flex items-center gap-1.5 shadow"
+          >
+            <Monitor className="w-4 h-4 text-cyan-200" />
+            <span>🖥️ Dual Screen (CFD)</span>
+          </button>
+
+          <a
+            href={`http://${window.location.hostname}:8289`}
+            target="_blank"
+            rel="noreferrer"
+            className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center gap-1.5 border border-slate-300 dark:border-slate-700"
+          >
+            <span>🚀 Standalone Port (:8289)</span>
+            <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
+          </a>
+
+          <button
+            type="button"
+            onClick={() => setShowHardwareModal(true)}
+            className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs flex items-center gap-1.5 border border-purple-200 dark:border-purple-800"
+          >
+            <Printer className="w-3.5 h-3.5 text-purple-600" />
+            <span>⚙️ Printer Config (Admin)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowCounterModal(true)}
+            className="px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold text-xs flex items-center gap-1.5 border border-blue-200 dark:border-blue-800"
+          >
+            <Store className="w-3.5 h-3.5 text-blue-600" />
+            <span>🏪 Cash Counters (Admin)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowReportsModal(true)}
+            className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold text-xs flex items-center gap-1.5 border border-amber-200 dark:border-amber-800"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-amber-600" />
+            <span>📊 Retail Reports (Admin)</span>
+          </button>
+        </div>
+      </div>
+
       {/* Persistent Top Low Stock Notification Bar (Hide/Close reappears in 15 min) */}
       <LowStockBanner
         outletCode={activeOutlet}
@@ -2077,6 +2395,35 @@ export const RetailPos: React.FC<RetailPosProps> = ({
           </div>
         </div>
       )}
+
+      {/* Admin Hardware & Printer Configuration Modal */}
+      <AdminPosHardwareModal
+        isOpen={showHardwareModal}
+        onClose={() => setShowHardwareModal(false)}
+        activeOutlet={activeOutlet}
+        outletName={outletObj?.trade_name}
+        actorName={actorName}
+      />
+
+      {/* Admin Cash Counters Setup & Terminal Binding Modal */}
+      <AdminCashCounterModal
+        isOpen={showCounterModal}
+        onClose={() => setShowCounterModal(false)}
+        activeOutlet={activeOutlet}
+        activeCounter={activeCounter}
+        onSelectCounter={(cnt) => {
+          setActiveCounter(cnt);
+          localStorage.setItem("annavya_pos_active_counter", JSON.stringify(cnt));
+        }}
+      />
+
+      {/* Admin Retail BI Reports Modal */}
+      <AdminRetailReportsModal
+        isOpen={showReportsModal}
+        onClose={() => setShowReportsModal(false)}
+        activeOutlet={activeOutlet}
+        outletName={outletObj?.trade_name}
+      />
     </div>
   );
 };

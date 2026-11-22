@@ -97,6 +97,12 @@ def apply_schema_migrations(cur):
         ("kot_mod.kots", "total_amount", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12,2) NOT NULL DEFAULT 0;"),
         ("kot_mod.kots", "void_reason", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS void_reason TEXT;"),
         ("kot_mod.kots", "order_source", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS order_source VARCHAR(20) DEFAULT 'DINE_IN';"),
+
+        # 10. pos_mod.pos_orders (Cash Counter, Cashier, Terminal IP)
+        ("pos_mod.pos_orders", "counter_id", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_id VARCHAR(40) DEFAULT 'CNT-01';"),
+        ("pos_mod.pos_orders", "counter_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';"),
+        ("pos_mod.pos_orders", "cashier_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';"),
+        ("pos_mod.pos_orders", "terminal_ip", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';"),
     ]
 
     print("[Render DB Bootstrap] Applying idempotent schema migrations...")
@@ -294,6 +300,41 @@ def apply_schema_migrations(cur):
         print("[Render DB Bootstrap] Ensured DEL01 restaurant dining tables exist.")
     except Exception as e:
         print(f"[Render DB Bootstrap] DEL01 dining tables warning: {e}")
+
+    # Ensure pos_mod.cash_counters table and initial seed exist
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pos_mod.cash_counters (
+                id SERIAL PRIMARY KEY,
+                counter_id VARCHAR(40) UNIQUE NOT NULL,
+                counter_name VARCHAR(80) NOT NULL,
+                outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+                ip_address VARCHAR(50) DEFAULT '127.0.0.1',
+                cashier_id VARCHAR(40) NOT NULL DEFAULT 'CSH-DEL01-001',
+                cashier_name VARCHAR(100) NOT NULL DEFAULT 'Priya Sharma',
+                printer_type VARCHAR(40) DEFAULT '40_COL_THERMAL',
+                printer_ip VARCHAR(60) DEFAULT '192.168.1.201',
+                printer_name VARCHAR(80) DEFAULT 'EPSON TM-T82II Thermal Receipt',
+                paper_width_mm INT DEFAULT 58,
+                is_dual_screen_enabled BOOLEAN DEFAULT TRUE,
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            INSERT INTO pos_mod.cash_counters 
+            (counter_id, counter_name, outlet_code, ip_address, cashier_id, cashier_name, printer_type, printer_ip, printer_name, paper_width_mm, is_dual_screen_enabled)
+            VALUES
+            ('CNT-DEL01-01', 'Mithai Counter 1', 'DEL01', '127.0.0.1', 'CSH-DEL01-001', 'Priya Sharma', '40_COL_THERMAL', '192.168.1.201', 'EPSON TM-T82II Thermal Receipt (40-Col)', 58, true),
+            ('CNT-DEL01-02', 'Express Sweets & Namkeen Desk', 'DEL01', '127.0.0.1', 'CSH-DEL01-002', 'Vikram Sethi', '40_COL_THERMAL', '192.168.1.202', 'TVS RP-3150 Star Thermal (80mm)', 80, true),
+            ('CNT-GUR02-01', 'Front Mithai Counter', 'GUR02', '127.0.0.1', 'CSH-GUR02-001', 'Arjun Negi', '40_COL_THERMAL', '192.168.2.101', 'Bixolon SRP-330II POS Receipt', 58, true),
+            ('CNT-JAI03-01', 'Main Mithai Cash Desk', 'JAI03', '127.0.0.1', 'CSH-JAI03-001', 'Kavita Rathore', '40_COL_THERMAL', '192.168.3.101', 'Citizen CT-S310II Thermal', 58, true),
+            ('CNT-NOI04-01', 'Bistro Sweets Counter', 'NOI04', '127.0.0.1', 'CSH-NOI04-001', 'Sanjay Verma', '40_COL_THERMAL', '192.168.4.101', 'Sewoo LK-T210 POS Receipt', 58, true)
+            ON CONFLICT (counter_id) DO NOTHING;
+        """)
+        print("[Render DB Bootstrap] Ensured pos_mod.cash_counters table and initial seed exist.")
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Cash counters warning: {e}")
 
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
 

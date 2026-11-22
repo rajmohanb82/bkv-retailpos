@@ -445,6 +445,28 @@ CREATE TABLE pos_mod.pos_orders (
     customer_name VARCHAR(120),
     customer_mobile VARCHAR(20),
     linked_table VARCHAR(32),
+    counter_id VARCHAR(40) DEFAULT 'CNT-01',
+    counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1',
+    cashier_name VARCHAR(100) DEFAULT 'Priya Sharma',
+    terminal_ip VARCHAR(50) DEFAULT '127.0.0.1',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE pos_mod.cash_counters (
+    id SERIAL PRIMARY KEY,
+    counter_id VARCHAR(40) UNIQUE NOT NULL,
+    counter_name VARCHAR(80) NOT NULL,
+    outlet_code VARCHAR(20) NOT NULL DEFAULT 'DEL01',
+    ip_address VARCHAR(50) DEFAULT '127.0.0.1',
+    cashier_id VARCHAR(40) NOT NULL DEFAULT 'CSH-DEL01-001',
+    cashier_name VARCHAR(100) NOT NULL DEFAULT 'Priya Sharma',
+    printer_type VARCHAR(40) DEFAULT '40_COL_THERMAL',
+    printer_ip VARCHAR(60) DEFAULT '192.168.1.201',
+    printer_name VARCHAR(80) DEFAULT 'EPSON TM-T82II Thermal Receipt',
+    paper_width_mm INT DEFAULT 58,
+    is_dual_screen_enabled BOOLEAN DEFAULT TRUE,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -789,6 +811,13 @@ INSERT INTO pos_mod.approvers (category, name, mobile, max_pct, monthly_quota, u
 INSERT INTO pos_mod.shifts (shift_no, outlet_code, cashier_name, opening_cash, system_cash_sales, status) VALUES
 ('SHF-DEL01-01', 'DEL01', 'Priya Sharma', 5000.00, 6840.00, 'OPEN'),
 ('SHF-GUR02-01', 'GUR02', 'Priya Sharma', 5000.00, 4120.00, 'OPEN');
+
+INSERT INTO pos_mod.cash_counters (counter_id, counter_name, outlet_code, ip_address, cashier_id, cashier_name, printer_type, printer_ip, printer_name, paper_width_mm, is_dual_screen_enabled) VALUES
+('CNT-DEL01-01', 'Mithai Counter 1', 'DEL01', '127.0.0.1', 'CSH-DEL01-001', 'Priya Sharma', '40_COL_THERMAL', '192.168.1.201', 'EPSON TM-T82II Thermal Receipt (40-Col)', 58, true),
+('CNT-DEL01-02', 'Express Sweets & Namkeen Desk', 'DEL01', '127.0.0.1', 'CSH-DEL01-002', 'Vikram Sethi', '40_COL_THERMAL', '192.168.1.202', 'TVS RP-3150 Star Thermal (80mm)', 80, true),
+('CNT-GUR02-01', 'Front Mithai Counter', 'GUR02', '127.0.0.1', 'CSH-GUR02-001', 'Arjun Negi', '40_COL_THERMAL', '192.168.2.101', 'Bixolon SRP-330II POS Receipt', 58, true),
+('CNT-JAI03-01', 'Main Mithai Cash Desk', 'JAI03', '127.0.0.1', 'CSH-JAI03-001', 'Kavita Rathore', '40_COL_THERMAL', '192.168.3.101', 'Citizen CT-S310II Thermal', 58, true),
+('CNT-NOI04-01', 'Bistro Sweets Counter', 'NOI04', '127.0.0.1', 'CSH-NOI04-001', 'Sanjay Verma', '40_COL_THERMAL', '192.168.4.101', 'Sewoo LK-T210 POS Receipt', 58, true);
 
 INSERT INTO pos_mod.pos_orders (estimate_no, invoice_no, outlet_code, mode, status, items, subtotal, discount_type, discount_category, discount_amount, cart_hash, cgst, sgst, grand_total, payment_splits, estimate_staff, cashier_id, delivery_staff, paid_at, delivered_at) VALUES
 ('EST-DEL01-0041', NULL, 'DEL01', '3_COUNTER', 'ESTIMATE_GENERATED', '[{"sku":"FG-KAJU-01","name":"Royal Silver-Leaf Kaju Katli","qty":1.0,"uom":"kg","unit_price":1180,"gst_pct":5,"gross_wt_g":1055,"tare_wt_g":55,"net_wt_g":1000,"line_total":1180},{"sku":"FG-RAS-01","name":"Spongy White Rasgulla","qty":0.5,"uom":"kg","unit_price":480,"gst_pct":5,"gross_wt_g":545,"tare_wt_g":45,"net_wt_g":500,"line_total":240}]'::jsonb, 1420.00, NULL, NULL, 0, 'a1b2c3d4e5f60041', 35.50, 35.50, 1491.00, '[]'::jsonb, 'Counter Staff 1', NULL, NULL, NULL, NULL),

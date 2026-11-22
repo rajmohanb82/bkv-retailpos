@@ -149,6 +149,9 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
     "----------------------------------------",
     `${isPaid ? "INV" : "EST"}: ${docId}`,
     `Token Last-4: #${last4} | Out: ${order?.outlet_code || "DEL01"}`,
+    `Counter: ${(order?.counter_name || order?.counter_id || "CNT-01").slice(0, 30)}`,
+    `Cashier: ${(order?.cashier_name || order?.cashier_id || order?.estimate_staff || "Cashier").slice(0, 30)}`,
+    ...(order?.terminal_ip ? [`Terminal IP: ${order.terminal_ip}`] : []),
     `Date: ${new Date().toLocaleString("en-IN")}`,
     ...(order?.customer_name || order?.customer_mobile
       ? [

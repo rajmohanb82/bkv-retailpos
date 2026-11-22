@@ -211,6 +211,7 @@ services:
     ports:
       - "8285:80"
       - "8288:88"
+      - "8289:89"
     depends_on:
       - admin-service
       - vendor-service
