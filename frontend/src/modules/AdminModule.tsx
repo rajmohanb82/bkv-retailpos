@@ -43,6 +43,11 @@ import {
   ExternalLink,
   Volume2,
   Flame,
+  MessageSquare,
+  Send,
+  Zap,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import { apiFetch } from "../api";
 import { BrandingConfig, PaymentGatewaysConfig } from "../types";
@@ -57,7 +62,7 @@ import {
 
 interface AdminModuleProps {
   onOutletsUpdated?: () => void;
-  initialTab?: "outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups";
+  initialTab?: "outlets" | "restaurant" | "branding" | "payments" | "whatsapp" | "rbac" | "sequences" | "hardware" | "config" | "backups";
 }
 
 const ALL_MODULE_KEYS: { key: string; label: string }[] = [
@@ -113,7 +118,7 @@ const STANDARD_KITCHEN_COUNTERS = [
 ];
 
 export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, initialTab = "outlets" }) => {
-  const [tab, setTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">(initialTab);
+  const [tab, setTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "whatsapp" | "rbac" | "sequences" | "hardware" | "config" | "backups">(initialTab);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
@@ -330,6 +335,82 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, init
   const [newEstimateCounterInput, setNewEstimateCounterInput] = useState("");
   const [savingCounters, setSavingCounters] = useState(false);
 
+  // WhatsApp Integration & Cloud Gateway State
+  const [waConfig, setWaConfig] = useState<any>({
+    provider: "META_CLOUD_API",
+    phone_number_id: "104928172918234",
+    waba_id: "90812374612345",
+    access_token: "EAAG_BIKANERVALA_PERMANENT_TOKEN_SECURE",
+    sender_display_name: "Bikanervala Foods Official",
+    support_phone: "+91-11-41551234",
+    auto_send_on_bill_settle: true,
+    auto_send_on_proforma: true,
+    include_pdf_link: true,
+    include_upi_qr: true,
+    brand_color: "#C8102E",
+    brand_tagline: "Taste of Tradition • Fresh Thinking",
+    status: "ACTIVE"
+  });
+  const [waLogs, setWaLogs] = useState<any[]>([]);
+  const [savingWaConfig, setSavingWaConfig] = useState(false);
+  const [waTestMobile, setWaTestMobile] = useState("9811445566");
+  const [waTestSending, setWaTestSending] = useState(false);
+  const [waTestResult, setWaTestResult] = useState<any>(null);
+
+  const loadWhatsAppConfig = async () => {
+    try {
+      const cfg = await apiFetch<any>("/api/admin/whatsapp-config");
+      if (cfg && cfg.provider) setWaConfig(cfg);
+    } catch (e) {
+      console.error("Could not load WhatsApp config:", e);
+    }
+  };
+
+  const loadWhatsAppLogs = async () => {
+    try {
+      const logs = await apiFetch<any[]>("/api/admin/whatsapp/logs");
+      if (logs) setWaLogs(logs);
+    } catch (e) {
+      console.error("Could not load WhatsApp logs:", e);
+    }
+  };
+
+  const handleSaveWhatsAppConfig = async () => {
+    setSavingWaConfig(true);
+    try {
+      const res = await apiFetch<any>("/api/admin/whatsapp-config", {
+        method: "PUT",
+        body: JSON.stringify(waConfig),
+      });
+      notify(true, res.message || "WhatsApp API & Cloud Gateway configuration saved successfully!");
+    } catch (e: any) {
+      notify(false, e.message || "Failed to save WhatsApp configuration");
+    } finally {
+      setSavingWaConfig(false);
+    }
+  };
+
+  const handleSendTestWhatsApp = async () => {
+    setWaTestSending(true);
+    setWaTestResult(null);
+    try {
+      const res = await apiFetch<any>("/api/admin/whatsapp/test-send", {
+        method: "POST",
+        body: JSON.stringify({
+          test_mobile: waTestMobile,
+          provider: waConfig.provider,
+        }),
+      });
+      setWaTestResult(res);
+      notify(true, res.message || `Test message sent to +${res.recipient}!`);
+      loadWhatsAppLogs();
+    } catch (e: any) {
+      notify(false, e.message || "Failed to send test WhatsApp message");
+    } finally {
+      setWaTestSending(false);
+    }
+  };
+
   const load = async () => {
     try {
       const [o, r, u, c, l, s, b, p] = await Promise.all([
@@ -361,6 +442,8 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, init
       const hw = c.find((cfg) => cfg.config_key === "pos_hardware_drivers")?.config_value;
       if (hw) setHwConfig(hw);
       loadBackups();
+      loadWhatsAppConfig();
+      loadWhatsAppLogs();
     } catch (e: any) {
       console.error(e);
     }
@@ -999,6 +1082,7 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, init
                   restaurant: "🍽️ Restaurant Admin (Floors, Tables & Counters)",
                   branding: "🎨 Brand & Dual-Logo Customizer",
                   payments: "💳 Payment Gateways (UPI, EDC POS & Coupons)",
+                  whatsapp: "💬 Official WhatsApp Cloud API & Document Gateway",
                   rbac: "👥 Users, MFA Security & RBAC Roles",
                   sequences: "#️⃣ Master Code Sequences & Prefixes",
                   hardware: "🖨️ POS Drivers, RJ11 Drawer & Peripherals",
@@ -2184,6 +2268,385 @@ export const AdminModule: React.FC<AdminModuleProps> = ({ onOutletsUpdated, init
             </div>
           </div>
         </form>
+      )}
+
+      {/* TAB: WHATSAPP CLOUD API & AUTOMATED DOCUMENT DISPATCH */}
+      {tab === "whatsapp" && (
+        <div className="space-y-6">
+          {/* Top Control Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center font-bold">
+                <MessageSquare className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-[#081F5C] dark:text-white flex items-center gap-2">
+                  <span>Official WhatsApp API & Cloud Document Gateway</span>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase">
+                    {waConfig.status || "ACTIVE"}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Seamlessly dispatch colourful proforma bills, dynamic UPI QR requests, and official GST tax invoices with PDF downloads directly from backend.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSaveWhatsAppConfig}
+                disabled={savingWaConfig}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold text-xs shadow-md hover:shadow-lg transition flex items-center gap-2"
+              >
+                {savingWaConfig ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Save className="w-4 h-4" />}
+                <span>Save WhatsApp Gateway</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            {/* Left 7 Cols: Gateway & Provider Setup */}
+            <div className="xl:col-span-7 space-y-6">
+              {/* Provider Selection */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                <h4 className="text-xs font-black text-[#081F5C] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-emerald-600" />
+                  <span>1. Select WhatsApp Messaging Provider</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  {[
+                    {
+                      id: "META_CLOUD_API",
+                      name: "Meta Cloud API (Official)",
+                      badge: "Recommended",
+                      desc: "Direct Graph API v19.0 with permanent token. Zero middleman fees, instant high-speed delivery.",
+                    },
+                    {
+                      id: "ANNAVYA_CLOUD_GATEWAY",
+                      name: "Annavya Cloud Relay",
+                      badge: "Zero-Config",
+                      desc: "Instant pre-configured cloud gateway for store owners without technical Meta developer setup.",
+                    },
+                    {
+                      id: "WATI",
+                      name: "WATI / Gupshup API",
+                      badge: "BSP Platform",
+                      desc: "Enterprise WhatsApp Business Solution Provider gateway with shared inbox support.",
+                    },
+                    {
+                      id: "ULTRAMSG",
+                      name: "UltraMsg / Webhook",
+                      badge: "Instance API",
+                      desc: "Third-party WhatsApp instance gateway with QR-code phone pairing.",
+                    },
+                  ].map((p) => {
+                    const isSelected = (waConfig.provider || "META_CLOUD_API") === p.id;
+                    return (
+                      <div
+                        key={p.id}
+                        onClick={() => setWaConfig({ ...waConfig, provider: p.id })}
+                        className={`p-3.5 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-2 ${
+                          isSelected
+                            ? "bg-emerald-500/10 border-emerald-500 text-emerald-950 dark:text-emerald-100 shadow-sm"
+                            : "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-emerald-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-xs">{p.name}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${
+                              isSelected
+                                ? "bg-emerald-600 text-white"
+                                : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                            }`}
+                          >
+                            {p.badge}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                          {p.desc}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* API Credentials Form */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                <h4 className="text-xs font-black text-[#081F5C] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <Key className="w-4 h-4 text-emerald-600" />
+                  <span>2. Gateway Credentials & Sender Details</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Phone Number ID *
+                    </label>
+                    <input
+                      type="text"
+                      value={waConfig.phone_number_id || ""}
+                      onChange={(e) => setWaConfig({ ...waConfig, phone_number_id: e.target.value })}
+                      placeholder="e.g. 104928172918234"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">From Meta App Dashboard → WhatsApp → API Setup</p>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      WhatsApp Business Account (WABA) ID
+                    </label>
+                    <input
+                      type="text"
+                      value={waConfig.waba_id || ""}
+                      onChange={(e) => setWaConfig({ ...waConfig, waba_id: e.target.value })}
+                      placeholder="e.g. 90812374612345"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">Found in Meta Business Manager settings</p>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Permanent System User Access Token / API Key *
+                    </label>
+                    <input
+                      type="password"
+                      value={waConfig.access_token || ""}
+                      onChange={(e) => setWaConfig({ ...waConfig, access_token: e.target.value })}
+                      placeholder="EAAG..."
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 text-xs"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Generate a System User token with <code className="text-emerald-600 font-bold">whatsapp_business_messaging</code> permissions.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Official Sender Display Name
+                    </label>
+                    <input
+                      type="text"
+                      value={waConfig.sender_display_name || "Bikanervala Foods Official"}
+                      onChange={(e) => setWaConfig({ ...waConfig, sender_display_name: e.target.value })}
+                      placeholder="Bikanervala Foods Official"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                      Customer Support / Order Helpline
+                    </label>
+                    <input
+                      type="text"
+                      value={waConfig.support_phone || "+91-11-41551234"}
+                      onChange={(e) => setWaConfig({ ...waConfig, support_phone: e.target.value })}
+                      placeholder="+91-11-41551234"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 font-semibold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Automation Rules */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                <h4 className="text-xs font-black text-[#081F5C] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-emerald-600" />
+                  <span>3. POS & Order Taking Automation Rules</span>
+                </h4>
+
+                <div className="space-y-3 text-xs">
+                  <label className="flex items-start gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.auto_send_on_bill_settle !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, auto_send_on_bill_settle: e.target.checked })}
+                      className="rounded text-emerald-600 mt-0.5"
+                    />
+                    <div>
+                      <div className="font-extrabold text-slate-900 dark:text-white text-xs">
+                        ⚡ Automatic Tax Invoice Dispatch on Settlement
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        When the cashier settles a bill with customer mobile, seamlessly send the colourful WhatsApp invoice and PDF without opening browser popups.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.auto_send_on_proforma !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, auto_send_on_proforma: e.target.checked })}
+                      className="rounded text-emerald-600 mt-0.5"
+                    />
+                    <div>
+                      <div className="font-extrabold text-slate-900 dark:text-white text-xs">
+                        📲 Proforma Bill & Dynamic UPI Instant Pay Request
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Include direct 1-tap NPCI UPI intent link so customers can pay immediately via Google Pay, PhonePe, Paytm, or WhatsApp Pay.
+                      </p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.include_pdf_link !== false}
+                      onChange={(e) => setWaConfig({ ...waConfig, include_pdf_link: e.target.checked })}
+                      className="rounded text-emerald-600 mt-0.5"
+                    />
+                    <div>
+                      <div className="font-extrabold text-slate-900 dark:text-white text-xs">
+                        📄 Digital PDF Invoice Download Link
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Embed an official Bikanervala digital invoice view & download link with GSTIN, FSSAI, itemized HSN codes, and 1-click printable receipt.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Right 5 Cols: Live Test Ping & Delivery Logs */}
+            <div className="xl:col-span-5 space-y-6">
+              {/* Test Sender Console */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                <h4 className="text-xs font-black text-[#081F5C] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  <span>Test WhatsApp Connection</span>
+                </h4>
+                <p className="text-[11px] text-slate-500">
+                  Transmit an instant test message to verify that your configured WhatsApp gateway is active and accepting connections.
+                </p>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1 text-xs">
+                      Recipient Mobile No.
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-slate-400 font-bold font-mono text-xs">
+                        +91
+                      </span>
+                      <input
+                        type="tel"
+                        value={waTestMobile.replace(/^\+?91/, "")}
+                        onChange={(e) => setWaTestMobile(e.target.value)}
+                        placeholder="9811445566"
+                        maxLength={10}
+                        className="w-full pl-12 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono font-bold text-slate-900 dark:text-white text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleSendTestWhatsApp}
+                    disabled={waTestSending}
+                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs shadow-md transition flex items-center justify-center gap-2"
+                  >
+                    {waTestSending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Transmitting Ping...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span>Transmit Test WhatsApp Message</span>
+                      </>
+                    )}
+                  </button>
+
+                  {waTestResult && (
+                    <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Ping Delivered Successfully!</span>
+                      </div>
+                      <div className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                        Transmitted to +{waTestResult.recipient} via {waTestResult.provider}.
+                      </div>
+                      <div className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
+                        Message ID: {waTestResult.message_id}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Message Dispatch Logs */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-[#081F5C] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-600" />
+                    <span>Recent WhatsApp Dispatch Logs</span>
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={loadWhatsAppLogs}
+                    className="text-[11px] text-emerald-600 font-bold hover:underline"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {waLogs.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                    No WhatsApp dispatches recorded yet. Complete a bill or send a test ping to view live logs.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                    {waLogs.map((log: any) => (
+                      <div
+                        key={log.id}
+                        className="p-3 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-xs space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-extrabold text-slate-900 dark:text-white font-mono">
+                            {log.doc_no}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-black text-[10px] uppercase">
+                            {log.status || "DELIVERED"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                          <span>+{log.recipient_mobile} ({log.customer_name || "Guest"})</span>
+                          <span className="font-mono text-[10px]">
+                            {log.created_at ? new Date(log.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Live"}
+                          </span>
+                        </div>
+                        <div className="pt-1 flex items-center justify-between text-[10px]">
+                          <span className="text-slate-400 font-mono truncate max-w-[200px]">
+                            {log.message_id || log.provider}
+                          </span>
+                          <a
+                            href={`/api/pos/orders/${log.doc_no}/digital-invoice`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-emerald-600 font-bold hover:underline inline-flex items-center gap-1"
+                          >
+                            <span>View PDF</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TAB 3: USERS & RBAC MODULE MATRIX */}

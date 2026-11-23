@@ -107,8 +107,11 @@ ${p.discountAmount && p.discountAmount > 0 ? `Discount: -₹${Number(p.discountA
 `Taxes (CGST 2.5% + SGST 2.5%): ₹${Number(p.cgst + p.sgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 💰 *PAYABLE AMOUNT: ₹${Number(p.grandTotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}*
 ---------------------------------------------
-📲 *TAP BELOW TO PAY DIRECTLY VIA UPI / WHATSAPP PAY:*
+📲 *TAP TO PAY VIA UPI / WHATSAPP PAY:*
 👉 ${upiUri}
+
+📄 *VIEW / DOWNLOAD PROFORMA (PDF):*
+👉 https://bkv-retailpos.onrender.com/api/pos/orders/${p.estimateNo}/digital-invoice
 
 _UPI ID:_ \`${vpa}\`
 _Supported Apps:_ *Google Pay, PhonePe, Paytm, BHIM, Cred, WhatsApp Pay*
@@ -186,10 +189,49 @@ SGST (2.5%): ₹${Number(p.sgst).toLocaleString("en-IN", { minimumFractionDigits
 🔖 *Payment Ref:* ${p.paymentRef || "VERIFIED & SETTLED"}
 ✅ *Status:* PAID & GOODS DELIVERED
 
+📄 *VIEW / DOWNLOAD OFFICIAL TAX INVOICE (PDF):*
+👉 https://bkv-retailpos.onrender.com/api/pos/orders/${p.invoiceNo}/digital-invoice
+
 Thank you for visiting Bikanervala! We hope you enjoyed our authentic sweets and savouries.
 _For party orders & corporate gifting: www.bikanervala.com_
 _Software powered by Annavya ERP (www.annavya.in)_`
   );
+}
+
+/**
+ * Seamless Backend WhatsApp Dispatch
+ */
+export interface BackendDispatchParams {
+  docType: "PROFORMA_UPI" | "TAX_INVOICE";
+  docId: string;
+  customerMobile: string;
+  customerName?: string;
+}
+
+export async function dispatchWhatsAppBackend(params: BackendDispatchParams): Promise<{
+  success: boolean;
+  message_id?: string;
+  pdf_url?: string;
+  status?: string;
+  message?: string;
+}> {
+  const cleanMob = cleanIndianMobile(params.customerMobile);
+  const res = await fetch("/api/pos/whatsapp/dispatch-backend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      doc_type: params.docType,
+      doc_id: params.docId,
+      customer_mobile: cleanMob,
+      customer_name: params.customerName || "Valued Customer",
+      send_pdf: true,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}: Failed to dispatch WhatsApp message`);
+  }
+  return await res.json();
 }
 
 /**

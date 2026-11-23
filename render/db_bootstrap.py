@@ -132,6 +132,23 @@ def apply_schema_migrations(cur):
         cur.execute("UPDATE admin_mod.users SET is_locked = false WHERE is_locked IS NULL;")
         cur.execute("UPDATE admin_mod.users SET role_ids = '[]'::jsonb WHERE role_ids IS NULL;")
         cur.execute("UPDATE admin_mod.users SET mfa_enabled = false WHERE mfa_enabled IS NULL;")
+        
+        # Ensure pos_mod.whatsapp_logs table exists
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pos_mod.whatsapp_logs (
+                id SERIAL PRIMARY KEY,
+                doc_type VARCHAR(40) NOT NULL,
+                doc_no VARCHAR(60) NOT NULL,
+                recipient_mobile VARCHAR(30) NOT NULL,
+                customer_name VARCHAR(120),
+                status VARCHAR(40) DEFAULT 'DELIVERED',
+                provider VARCHAR(60) DEFAULT 'META_CLOUD_API',
+                message_id VARCHAR(100),
+                payload JSONB DEFAULT '{}'::jsonb,
+                response_text TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
     except Exception as e:
         print(f"[Render DB Bootstrap] Data fixup warning: {e}")
 

@@ -114,7 +114,7 @@ export default function App() {
   const [storesSubTab, setStoresSubTab] = useState<"inbox" | "search" | "checkinout" | "batches" | "bom" | "alerts" | "transfer" | "reports">("inbox");
   const [factorySubTab, setFactorySubTab] = useState<"inbox" | "kettles" | "orders" | "qc" | "dispatch" | "tracker">("inbox");
   const [omsSubTab, setOmsSubTab] = useState<"aggregators" | "bulk" | "config">("aggregators");
-  const [adminSubTab, setAdminSubTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "rbac" | "sequences" | "hardware" | "config" | "backups">("outlets");
+  const [adminSubTab, setAdminSubTab] = useState<"outlets" | "restaurant" | "branding" | "payments" | "whatsapp" | "rbac" | "sequences" | "hardware" | "config" | "backups">("outlets");
   const [shopSubTab, setShopSubTab] = useState<"stock" | "eod" | "shifts" | "promos" | "otp">("stock");
   const [vendorSubTab, setVendorSubTab] = useState<"portal" | "tenders" | "vendors" | "pos" | "prices">("portal");
   const [itemAdminSubTab, setItemAdminSubTab] = useState<"items" | "rates" | "promos" | "packages">("items");
@@ -831,6 +831,7 @@ export default function App() {
                         { id: "restaurant", label: "🍽️ Restaurant Admin", sub: "Floors & Counters" },
                         { id: "branding", label: "🎨 Brand & Logo", sub: "Dual-Logo Proportions" },
                         { id: "payments", label: "💳 Payment Gateways", sub: "UPI, EDC POS & Coupons" },
+                        { id: "whatsapp", label: "💬 WhatsApp API", sub: "Cloud Gateway & Templates" },
                         { id: "rbac", label: "👥 Users & MFA", sub: "RBAC & Security Keys" },
                         { id: "sequences", label: "#️⃣ Code Sequences", sub: "Master Barcode Prefixes" },
                         { id: "hardware", label: "🖨️ POS & Kiosk Hardware", sub: "Printers, EDC & Display" },

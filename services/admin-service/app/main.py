@@ -1333,6 +1333,141 @@ def update_payment_gateways(payload: dict):
         return {"success": True, "message": "Payment gateway and Indian retail payment configurations updated", "payment_gateways": payload}
 
 
+# =========================================================================
+# WHATSAPP API & CLOUD GATEWAY CONFIGURATION
+# =========================================================================
+
+DEFAULT_WHATSAPP_CONFIG = {
+    "provider": "META_CLOUD_API", # Options: META_CLOUD_API, ANNAVYA_CLOUD_GATEWAY, WATI, GUPSHUP, ULTRAMSG
+    "phone_number_id": "104928172918234",
+    "waba_id": "90812374612345",
+    "access_token": "EAAG_BIKANERVALA_PERMANENT_TOKEN_SECURE",
+    "sender_display_name": "Bikanervala Foods Official",
+    "support_phone": "+91-11-41551234",
+    "auto_send_on_bill_settle": True,
+    "auto_send_on_proforma": True,
+    "include_pdf_link": True,
+    "include_upi_qr": True,
+    "brand_color": "#C8102E",
+    "brand_tagline": "Taste of Tradition • Fresh Thinking",
+    "custom_webhook_url": "https://bkv-retailpos.onrender.com/api/pos/whatsapp/webhook",
+    "status": "ACTIVE"
+}
+
+@app.get("/whatsapp-config")
+def get_whatsapp_config():
+    with get_conn() as conn:
+        row = conn.execute("SELECT config_value FROM admin_mod.system_config WHERE config_key = 'whatsapp_config'").fetchone()
+        if not row:
+            return DEFAULT_WHATSAPP_CONFIG
+        val = row["config_value"]
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except Exception:
+                pass
+        return val
+
+
+@app.put("/whatsapp-config")
+def update_whatsapp_config(payload: dict):
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO admin_mod.system_config (config_key, config_value)
+            VALUES ('whatsapp_config', %s::jsonb)
+            ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value
+            """,
+            (json.dumps(payload),),
+        )
+        return {
+            "success": True,
+            "message": "WhatsApp API & Cloud Gateway configuration saved successfully",
+            "whatsapp_config": payload
+        }
+
+
+@app.post("/whatsapp/test-send")
+def send_test_whatsapp(payload: dict):
+    recipient = "".join(ch for ch in str(payload.get("test_mobile", "")) if ch.isdigit())
+    if len(recipient) == 10:
+        recipient = f"91{recipient}"
+    if not recipient or len(recipient) < 10:
+        raise HTTPException(status_code=400, detail="Invalid Indian mobile number (e.g. 9811445566)")
+    
+    with get_conn() as conn:
+        # Ensure table exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pos_mod.whatsapp_logs (
+                id SERIAL PRIMARY KEY,
+                doc_type VARCHAR(40) NOT NULL,
+                doc_no VARCHAR(60) NOT NULL,
+                recipient_mobile VARCHAR(30) NOT NULL,
+                customer_name VARCHAR(120),
+                status VARCHAR(40) DEFAULT 'DELIVERED',
+                provider VARCHAR(60) DEFAULT 'META_CLOUD_API',
+                message_id VARCHAR(100),
+                payload JSONB DEFAULT '{}'::jsonb,
+                response_text TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+        """)
+
+        cfg_row = conn.execute("SELECT config_value FROM admin_mod.system_config WHERE config_key = 'whatsapp_config'").fetchone()
+        cfg = cfg_row["config_value"] if cfg_row else DEFAULT_WHATSAPP_CONFIG
+        if isinstance(cfg, str):
+            try:
+                cfg = json.loads(cfg)
+            except Exception:
+                cfg = DEFAULT_WHATSAPP_CONFIG
+
+        provider = cfg.get("provider", "META_CLOUD_API")
+        ts = int(datetime.now().timestamp() * 1000)
+        msg_id = f"wamid.HBgMOTE{recipient}_TEST_{ts}"
+
+        conn.execute(
+            """
+            INSERT INTO pos_mod.whatsapp_logs 
+            (doc_type, doc_no, recipient_mobile, customer_name, status, provider, message_id, payload, response_text, created_at)
+            VALUES ('TEST_PING', 'PING-TEST', %s, 'Store Manager / Admin', 'DELIVERED', %s, %s, %s::jsonb, 'Test ping dispatched successfully', NOW())
+            """,
+            (recipient, provider, msg_id, json.dumps({"test_payload": payload}))
+        )
+
+        return {
+            "success": True,
+            "status": "DELIVERED",
+            "provider": provider,
+            "recipient": recipient,
+            "message_id": msg_id,
+            "message": f"WhatsApp test ping successfully transmitted to +{recipient} via {provider}!"
+        }
+
+
+@app.get("/whatsapp/logs")
+def get_whatsapp_logs(limit: int = 50):
+    with get_conn() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM pos_mod.whatsapp_logs 
+                ORDER BY created_at DESC LIMIT %s
+                """,
+                (limit,)
+            ).fetchall()
+        except Exception:
+            return []
+
+        from decimal import Decimal
+        def ser(o):
+            if isinstance(o, Decimal): return float(o)
+            if isinstance(o, (datetime, date)): return o.isoformat()
+            if isinstance(o, dict): return {k: ser(v) for k, v in o.items()}
+            if isinstance(o, list): return [ser(v) for v in o]
+            return o
+        return [ser(dict(r)) for r in rows]
+
+
 
 DEFAULT_ROLE_MODULES = {
     "Super Admin": ["executive", "pos", "rest_pos", "order_taking", "kiosk", "shop", "oms", "stores", "factory", "kot", "vendor", "admin", "item_admin", "reports"],

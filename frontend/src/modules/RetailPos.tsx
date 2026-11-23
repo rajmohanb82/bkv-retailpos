@@ -730,6 +730,9 @@ export const RetailPos: React.FC<RetailPosProps> = ({
       ];
     }
     try {
+      const targetCustMobile = loadedOrder.customer_mobile || customerMobile || undefined;
+      const targetCustName = loadedOrder.customer_name || customerName || undefined;
+
       const paid = await apiFetch(`/api/pos/orders/${loadedOrder.estimate_no}/pay`, {
         method: "POST",
         body: JSON.stringify({
@@ -739,6 +742,9 @@ export const RetailPos: React.FC<RetailPosProps> = ({
           counter_id: activeCounter?.counter_id || "CNT-01",
           counter_name: activeCounter?.counter_name || "Mithai Counter 1",
           terminal_ip: activeCounter?.ip_address || "127.0.0.1",
+          customer_mobile: targetCustMobile,
+          customer_name: targetCustName,
+          send_whatsapp: true,
         }),
       });
       setLoadedOrder(paid);
@@ -759,12 +765,11 @@ export const RetailPos: React.FC<RetailPosProps> = ({
       print40ColumnThermalSlip(paid, outletObj, hwConfig?.active_printer_driver);
 
       // Action 2: WhatsApp Tax Invoice Dispatch to Customer Mobile
-      const targetMobile = paid.customer_mobile || loadedOrder.customer_mobile || customerMobile;
+      const targetMobile = paid.customer_mobile || targetCustMobile;
       if (targetMobile) {
-        triggerWhatsAppDispatch("TAX_INVOICE", paid, targetMobile);
         notify(
           "ok",
-          `Tax Invoice ${paid.invoice_no} paid via ${payMode}! Receipt printed & WhatsApp copy dispatched to ${targetMobile}.`
+          `Tax Invoice ${paid.invoice_no} paid via ${payMode}! Cash drawer ejected, receipt printed & WhatsApp invoice seamlessly dispatched to +${targetMobile}.`
         );
       } else {
         notify(
