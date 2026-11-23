@@ -35,6 +35,7 @@ import {
   Sparkles,
   QrCode,
   Check,
+  MessageSquare,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
@@ -46,6 +47,14 @@ import { AdminPosHardwareModal } from "../components/AdminPosHardwareModal";
 import { AdminCashCounterModal, CashCounter } from "../components/AdminCashCounterModal";
 import { AdminRetailReportsModal } from "../components/AdminRetailReportsModal";
 import { DualScreenPayload } from "../components/RetailCustomerDisplay";
+import { WhatsAppDispatchModal } from "../components/WhatsAppDispatchModal";
+import {
+  cleanIndianMobile,
+  formatWhatsAppProformaText,
+  formatWhatsAppInvoiceText,
+  openWhatsAppChat,
+  generateUpiIntentUri,
+} from "../utils/whatsappHelper";
 
 interface RetailPosProps {
   activeOutlet: string;
@@ -129,6 +138,48 @@ export const RetailPos: React.FC<RetailPosProps> = ({
   const [deliveryBarcode, setDeliveryBarcode] = useState("");
   const [deliveryPreviewOrder, setDeliveryPreviewOrder] = useState<any>(null);
   const [deliveryAlert, setDeliveryAlert] = useState<string | null>(null);
+
+  // WhatsApp Integration State
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
+  const [whatsAppModalMode, setWhatsAppModalMode] = useState<"PROFORMA_UPI" | "TAX_INVOICE">("PROFORMA_UPI");
+  const [whatsAppOrderData, setWhatsAppOrderData] = useState<any>(null);
+
+  const triggerWhatsAppDispatch = (
+    mode: "PROFORMA_UPI" | "TAX_INVOICE",
+    order: any,
+    customMobile?: string
+  ) => {
+    const mob = customMobile || order?.customer_mobile || customerMobile || "";
+    const items = order?.items || cart || [];
+    const subtotal = Number(order?.subtotal || cart.reduce((s, c) => s + Number(c.line_total || 0), 0));
+    const disc = Number(order?.discount_amount || 0);
+    const cgst = Number(order?.cgst || Math.round((subtotal * 0.025) * 100) / 100);
+    const sgst = Number(order?.sgst || Math.round((subtotal * 0.025) * 100) / 100);
+    const grandTotal = Number(order?.grand_total || (subtotal - disc + cgst + sgst));
+    const docId = mode === "TAX_INVOICE"
+      ? (order?.invoice_no || order?.estimate_no || "INV-LIVE")
+      : (order?.estimate_no || "EST-LIVE");
+
+    setWhatsAppOrderData({
+      docId,
+      customerName: order?.customer_name || customerName || "Valued Customer",
+      customerMobile: mob,
+      items,
+      subtotal,
+      discountAmount: disc,
+      cgst,
+      sgst,
+      grandTotal,
+      paymentMode: order?.payment_splits?.[0]?.mode || payMode,
+      paymentRef: order?.payment_splits?.[0]?.ref || "PAID-UPI",
+      paidAt: order?.paid_at,
+      outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+      counterName: activeCounter?.counter_name || "Mithai Counter 1",
+      cashierName: activeCounter?.cashier_name || actorName || "Priya Sharma",
+    });
+    setWhatsAppModalMode(mode);
+    setWhatsAppModalOpen(true);
+  };
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const scanInputRef = useRef<HTMLInputElement>(null);
@@ -701,16 +752,26 @@ export const RetailPos: React.FC<RetailPosProps> = ({
       });
       await loadData();
 
-      // Simultaneously eject cash drawer AND print 40-column thermal invoice
+      // Action 1: Eject cash drawer AND print 40-column thermal invoice
       if (hwConfig?.cash_drawer?.enabled !== false) {
         handleDrawerKick(`Payment Settled (${paid.invoice_no} • ${payMode})`);
       }
       print40ColumnThermalSlip(paid, outletObj, hwConfig?.active_printer_driver);
 
-      notify(
-        "ok",
-        `Tax Invoice ${paid.invoice_no} (#${String(paid.invoice_no).slice(-4)}) paid via ${payMode}! Cash Drawer ejected & 40-Col Invoice printed.`
-      );
+      // Action 2: WhatsApp Tax Invoice Dispatch to Customer Mobile
+      const targetMobile = paid.customer_mobile || loadedOrder.customer_mobile || customerMobile;
+      if (targetMobile) {
+        triggerWhatsAppDispatch("TAX_INVOICE", paid, targetMobile);
+        notify(
+          "ok",
+          `Tax Invoice ${paid.invoice_no} paid via ${payMode}! Receipt printed & WhatsApp copy dispatched to ${targetMobile}.`
+        );
+      } else {
+        notify(
+          "ok",
+          `Tax Invoice ${paid.invoice_no} (#${String(paid.invoice_no).slice(-4)}) paid via ${payMode}! Cash Drawer ejected & 40-Col Invoice printed.`
+        );
+      }
     } catch (e: any) {
       notify("err", e.message);
     }
@@ -1669,16 +1730,67 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                         <kbd className="px-1.5 py-0.5 rounded bg-white text-[10px] font-mono">Enter ×2</kbd>
                       </div>
                     )}
-                    <button
-                      disabled={cart.length === 0}
-                      onClick={generateEstimate}
-                      className={`w-full rounded-xl bg-annavya-navy text-white font-bold text-xs hover:bg-annavya-royal disabled:opacity-40 transition flex items-center justify-center gap-2 ${
-                        touchMode ? "py-3.5 text-sm" : "py-2.5"
-                      }`}
-                    >
-                      <span>Generate 40-Col Estimate Slip</span>
-                      <kbd className="px-1.5 py-0.5 rounded bg-white/20 text-[10px] font-mono">Enter ×2</kbd>
-                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <button
+                        disabled={cart.length === 0}
+                        onClick={generateEstimate}
+                        className={`rounded-xl bg-annavya-navy text-white font-bold text-xs hover:bg-annavya-royal disabled:opacity-40 transition flex items-center justify-center gap-1.5 shadow-sm ${
+                          touchMode ? "py-3 text-xs" : "py-2"
+                        }`}
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>Print Estimate [F6]</span>
+                        <kbd className="px-1 py-0.5 rounded bg-white/20 text-[9px] font-mono">Enter ×2</kbd>
+                      </button>
+
+                      <button
+                        disabled={cart.length === 0}
+                        type="button"
+                        onClick={() => {
+                          const subtotal = cart.reduce((s, c) => s + Number(c.line_total || 0), 0);
+                          const gst = cart.reduce((s, c) => s + (Number(c.line_total || 0) * (Number(c.gst_pct || 5) / 100)), 0);
+                          const grandTotal = Math.round((subtotal + gst) * 100) / 100;
+
+                          // 1. Dual Screen CFD Broadcast
+                          broadcastToCfd({
+                            items: cart,
+                            subtotal,
+                            discountAmount: 0,
+                            cgst: Math.round((gst / 2) * 100) / 100,
+                            sgst: Math.round((gst / 2) * 100) / 100,
+                            grandTotal,
+                            paymentMode: "UPI",
+                            paymentPending: true,
+                            docId: "EST-LIVE",
+                            customerName,
+                            customerMobile,
+                            isSettled: false,
+                          });
+
+                          // 2. WhatsApp Proforma & Pay link dispatch
+                          triggerWhatsAppDispatch("PROFORMA_UPI", {
+                            docId: "EST-LIVE",
+                            customerName,
+                            customerMobile,
+                            items: cart,
+                            subtotal,
+                            discountAmount: 0,
+                            cgst: Math.round((gst / 2) * 100) / 100,
+                            sgst: Math.round((gst / 2) * 100) / 100,
+                            grandTotal,
+                            outletName: outletObj?.trade_name,
+                            counterName: activeCounter?.counter_name,
+                            cashierName: activeCounter?.cashier_name || actorName,
+                          });
+                        }}
+                        className={`rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs disabled:opacity-40 transition flex items-center justify-center gap-1.5 shadow-sm ${
+                          touchMode ? "py-3 text-xs" : "py-2"
+                        }`}
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>📲 Pay via WhatsApp & UPI</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1817,7 +1929,25 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                             {(["UPI", "Cash", "Credit Card", "Food Coupon", "Split"] as const).map((m) => (
                               <button
                                 key={m}
-                                onClick={() => setPayMode(m)}
+                                onClick={() => {
+                                  setPayMode(m);
+                                  if (m === "UPI" && loadedOrder) {
+                                    broadcastToCfd({
+                                      items: loadedOrder.items,
+                                      subtotal: Number(loadedOrder.subtotal),
+                                      discountAmount: Number(loadedOrder.discount_amount || 0),
+                                      cgst: Number(loadedOrder.cgst),
+                                      sgst: Number(loadedOrder.sgst),
+                                      grandTotal: Number(loadedOrder.grand_total),
+                                      paymentMode: "UPI",
+                                      paymentPending: true,
+                                      docId: loadedOrder.estimate_no,
+                                      customerName: loadedOrder.customer_name || customerName,
+                                      customerMobile: loadedOrder.customer_mobile || customerMobile,
+                                      isSettled: false,
+                                    });
+                                  }
+                                }}
                                 className={`rounded-xl text-xs font-bold border ${
                                   touchMode ? "px-4 py-2.5" : "px-3 py-1.5"
                                 } ${
@@ -1847,6 +1977,23 @@ export const RetailPos: React.FC<RetailPosProps> = ({
                                 </span>
                               </div>
 
+                              {/* Dual Actions Status Banner: Dual Screen Active + WhatsApp Action */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-1.5 text-[11px] text-blue-900 font-semibold">
+                                  <Monitor className="w-4 h-4 text-blue-600 shrink-0" />
+                                  <span className="truncate">Dual Screen (CFD) Scanner Active</span>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => triggerWhatsAppDispatch("PROFORMA_UPI", loadedOrder)}
+                                  className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] px-3 py-1.5 rounded-xl shadow-sm transition"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>📲 Send UPI to WhatsApp</span>
+                                </button>
+                              </div>
+
                               <div className="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-purple-100 shadow-sm">
                                 <div className="w-14 h-14 bg-slate-900 rounded-lg p-1.5 flex flex-col justify-between flex-shrink-0 shadow-inner">
                                   <div className="flex justify-between">
@@ -1873,7 +2020,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
 
                                 <div className="min-w-0 flex-1 space-y-1">
                                   <div className="text-[11px] font-bold text-slate-800">
-                                    Scan with GPay, PhonePe, Paytm or BHIM
+                                    Scan with GPay, PhonePe, Paytm, BHIM or WhatsApp Pay
                                   </div>
                                   <div className="text-[10px] text-slate-500 font-mono truncate" title={`upi://pay?pa=bikanervala@icici&pn=Bikanervala&am=${loadedOrder.grand_total}&tn=INV-${loadedOrder.invoice_no}`}>
                                     upi://pay?pa=bikanervala@icici&am={loadedOrder.grand_total}
@@ -2203,7 +2350,31 @@ export const RetailPos: React.FC<RetailPosProps> = ({
               </span>
             </div>
             {selectedSlip ? (
-              <ThermalSlip order={selectedSlip} outlet={outletObj} />
+              <>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isInv = selectedSlip.status === "DELIVERED_CLOSED" || selectedSlip.status === "PAID_PENDING_DELIVERY";
+                      triggerWhatsAppDispatch(isInv ? "TAX_INVOICE" : "PROFORMA_UPI", selectedSlip);
+                    }}
+                    className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>📲 Send to WhatsApp</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => print40ColumnThermalSlip(selectedSlip, outletObj, hwConfig?.active_printer_driver)}
+                    className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-1 border border-slate-300 transition"
+                    title="Reprint 40-Column Thermal Slip"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Reprint</span>
+                  </button>
+                </div>
+                <ThermalSlip order={selectedSlip} outlet={outletObj} />
+              </>
             ) : (
               <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-xs text-slate-400">
                 Generate an Estimate or select an Order to preview the live 40-Column Thermal Slip & Code128 Barcode
@@ -2432,6 +2603,22 @@ export const RetailPos: React.FC<RetailPosProps> = ({
         activeOutlet={activeOutlet}
         outletName={outletObj?.trade_name}
       />
+
+      {/* WhatsApp Invoice & Proforma Dispatch Modal */}
+      {whatsAppOrderData && (
+        <WhatsAppDispatchModal
+          isOpen={whatsAppModalOpen}
+          onClose={() => setWhatsAppModalOpen(false)}
+          mode={whatsAppModalMode}
+          orderData={whatsAppOrderData}
+          onSent={(cleanMob) => {
+            notify(
+              "ok",
+              `Dispatched ${whatsAppModalMode === "PROFORMA_UPI" ? "UPI Proforma & Pay link" : "Official Tax Invoice"} to WhatsApp (${cleanMob})!`
+            );
+          }}
+        />
+      )}
     </div>
   );
 };

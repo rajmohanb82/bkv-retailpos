@@ -98,11 +98,13 @@ def apply_schema_migrations(cur):
         ("kot_mod.kots", "void_reason", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS void_reason TEXT;"),
         ("kot_mod.kots", "order_source", "ALTER TABLE kot_mod.kots ADD COLUMN IF NOT EXISTS order_source VARCHAR(20) DEFAULT 'DINE_IN';"),
 
-        # 10. pos_mod.pos_orders (Cash Counter, Cashier, Terminal IP)
+        # 10. pos_mod.pos_orders (Cash Counter, Cashier, Terminal IP, WhatsApp Integration)
         ("pos_mod.pos_orders", "counter_id", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_id VARCHAR(40) DEFAULT 'CNT-01';"),
         ("pos_mod.pos_orders", "counter_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';"),
         ("pos_mod.pos_orders", "cashier_name", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';"),
         ("pos_mod.pos_orders", "terminal_ip", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';"),
+        ("pos_mod.pos_orders", "whatsapp_sent_at", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_sent_at TIMESTAMPTZ;"),
+        ("pos_mod.pos_orders", "whatsapp_invoice_status", "ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_invoice_status VARCHAR(40);"),
 
         # 11. stores_mod.material_requisitions (Stores Checkout Gate, Order Type, Customer Details & Barcode)
         ("stores_mod.material_requisitions", "order_type", "ALTER TABLE stores_mod.material_requisitions ADD COLUMN IF NOT EXISTS order_type VARCHAR(60) DEFAULT 'Factory BOM Requisition';"),

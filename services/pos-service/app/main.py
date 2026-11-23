@@ -1,5 +1,6 @@
 import json
 import random
+import urllib.parse
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException, Request, Query
@@ -8,6 +9,157 @@ from common.app_factory import create_service_app
 from common.db import get_conn, compute_cart_hash
 
 app = create_service_app("Retail POS & Shop Manager Service")
+
+
+def clean_indian_mobile(raw: str) -> str:
+    cleaned = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if cleaned.startswith("0") and len(cleaned) == 11:
+        cleaned = cleaned[1:]
+    if len(cleaned) == 10:
+        return f"91{cleaned}"
+    if len(cleaned) == 12 and cleaned.startswith("91"):
+        return cleaned
+    return cleaned
+
+
+def generate_upi_intent_uri(vpa: str, payee_name: str, amount: float, doc_id: str) -> str:
+    am = f"{max(0.0, float(amount)):.2f}"
+    tn = urllib.parse.quote(f"Bill {doc_id}")
+    pn = urllib.parse.quote(payee_name)
+    return f"upi://pay?pa={vpa}&pn={pn}&am={am}&cu=INR&tn={tn}"
+
+
+def format_whatsapp_upi_proforma(order: dict, outlet_name: str = "Connaught Place Flagship (New Delhi)") -> tuple[str, str]:
+    mobile = clean_indian_mobile(order.get("customer_mobile") or "")
+    items = order.get("items") or []
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except Exception:
+            items = []
+            
+    items_lines = []
+    for idx, i in enumerate(items[:6], 1):
+        uom = i.get("uom", "pcs")
+        qty = i.get("qty", 1)
+        lt = float(i.get("line_total", 0))
+        items_lines.append(f"{idx}. *{i.get('name', 'Item')}*\n   {qty} {uom} × ₹{float(i.get('unit_price', 0)):,.2f} = *₹{lt:,.2f}*")
+        
+    items_text = "\n".join(items_lines)
+    if len(items) > 6:
+        items_text += f"\n   _...and {len(items)-6} more item(s)_"
+        
+    grand_total = float(order.get("grand_total", 0))
+    est_no = order.get("estimate_no", "EST-LIVE")
+    vpa = "bikanervala.retail@icici"
+    upi_intent = generate_upi_intent_uri(vpa, "Bikanervala Foods Pvt Ltd", grand_total, est_no)
+    
+    subtotal = float(order.get("subtotal", 0))
+    disc = float(order.get("discount_amount", 0))
+    cgst = float(order.get("cgst", 0))
+    sgst = float(order.get("sgst", 0))
+    
+    msg = (
+        f"✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨\n"
+        f"_Taste of Tradition • Fresh Thinking_\n"
+        f"📍 {outlet_name}\n"
+        f"GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451\n"
+        f"---------------------------------------------\n"
+        f"📋 *PROFORMA BILL / ESTIMATE: #{est_no}*\n"
+        f"👤 *Guest:* {order.get('customer_name') or 'Valued Customer'}\n"
+        f"🏢 *Counter:* {order.get('counter_name') or 'Mithai Counter 1'} | *Staff:* {order.get('cashier_name') or order.get('estimate_staff') or 'Priya Sharma'}\n"
+        f"---------------------------------------------\n"
+        f"*ORDER SUMMARY:*\n{items_text}\n"
+        f"---------------------------------------------\n"
+        f"Subtotal: ₹{subtotal:,.2f}\n"
+        f"{f'Discount: -₹{disc:,.2f}\n' if disc > 0 else ''}"
+        f"Taxes (CGST 2.5% + SGST 2.5%): ₹{(cgst + sgst):,.2f}\n"
+        f"💰 *TOTAL PAYABLE: ₹{grand_total:,.2f}*\n"
+        f"---------------------------------------------\n"
+        f"📲 *TAP BELOW TO PAY DIRECTLY VIA UPI / WHATSAPP PAY:*\n"
+        f"👉 {upi_intent}\n\n"
+        f"_UPI ID:_ `{vpa}`\n"
+        f"_Supported Apps:_ *Google Pay, PhonePe, Paytm, BHIM, Cred, WhatsApp Pay*\n\n"
+        f"💡 *Counter Payment:* You can also scan the active QR scanner displayed on our Dual Screen at the counter.\n"
+        f"Once paid, your official Tax Invoice and packaging will be handed to you immediately!\n\n"
+        f"🙏 *Thank you for choosing Bikanervala!*"
+    )
+    encoded = urllib.parse.quote(msg)
+    wa_link = f"https://wa.me/{mobile}?text={encoded}" if mobile else ""
+    return msg, wa_link
+
+
+def format_whatsapp_tax_invoice(order: dict, outlet_name: str = "Connaught Place Flagship (New Delhi)") -> tuple[str, str]:
+    mobile = clean_indian_mobile(order.get("customer_mobile") or "")
+    items = order.get("items") or []
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except Exception:
+            items = []
+            
+    items_lines = []
+    for idx, i in enumerate(items, 1):
+        uom = i.get("uom", "pcs")
+        qty = i.get("qty", 1)
+        lt = float(i.get("line_total", 0))
+        items_lines.append(f"{idx}. *{i.get('name', 'Item')}*\n   Qty: {qty} {uom} | Rate: ₹{float(i.get('unit_price', 0)):,.2f} | *₹{lt:,.2f}*")
+        
+    items_text = "\n".join(items_lines)
+    paid_at = order.get("paid_at") or datetime.now()
+    if isinstance(paid_at, str):
+        try:
+            paid_at = datetime.fromisoformat(paid_at.replace("Z", "+00:00"))
+        except Exception:
+            paid_at = datetime.now()
+    dt_str = paid_at.strftime("%d-%b-%Y at %I:%M %p")
+    
+    splits = order.get("payment_splits") or []
+    if isinstance(splits, str):
+        try:
+            splits = json.loads(splits)
+        except Exception:
+            splits = []
+    pay_methods = ", ".join([str(s.get("mode", "UPI")) for s in splits]) if splits else "UPI"
+    pay_ref = splits[0].get("ref", "VERIFIED") if splits else "VERIFIED"
+    inv_no = order.get("invoice_no") or f"INV-POS-{order.get('estimate_no')}"
+    grand_total = float(order.get("grand_total", 0))
+    subtotal = float(order.get("subtotal", 0))
+    disc = float(order.get("discount_amount", 0))
+    cgst = float(order.get("cgst", 0))
+    sgst = float(order.get("sgst", 0))
+
+    msg = (
+        f"✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨\n"
+        f"_Taste of Tradition • Fresh Thinking_\n"
+        f"📍 {outlet_name}\n"
+        f"GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451\n"
+        f"---------------------------------------------\n"
+        f"🧾 *OFFICIAL GST TAX INVOICE*\n"
+        f"*Invoice No:* {inv_no} (Ref: #{order.get('estimate_no', 'N/A')})\n"
+        f"🗓️ *Date & Time:* {dt_str}\n"
+        f"👤 *Customer:* {order.get('customer_name') or 'Valued Customer'} ({order.get('customer_mobile') or 'Counter Guest'})\n"
+        f"🏢 *Counter:* {order.get('counter_name') or 'Mithai Counter 1'}\n"
+        f"👨‍💼 *Cashier:* {order.get('cashier_name') or 'Priya Sharma'}\n"
+        f"---------------------------------------------\n"
+        f"*ITEMIZED BILL PARTICULARS:*\n{items_text}\n"
+        f"---------------------------------------------\n"
+        f"Subtotal: ₹{subtotal:,.2f}\n"
+        f"{f'Discount Applied: -₹{disc:,.2f}\n' if disc > 0 else ''}"
+        f"CGST (2.5%): ₹{cgst:,.2f}\n"
+        f"SGST (2.5%): ₹{sgst:,.2f}\n"
+        f"💰 *TOTAL PAID: ₹{grand_total:,.2f}*\n"
+        f"---------------------------------------------\n"
+        f"💳 *Payment Mode:* {pay_methods}\n"
+        f"🔖 *Payment Ref:* {pay_ref}\n"
+        f"✅ *Status:* PAID & GOODS DELIVERED\n\n"
+        f"Thank you for visiting Bikanervala! We hope you enjoyed our authentic sweets and savouries.\n"
+        f"_For party orders & corporate gifting: www.bikanervala.com_\n"
+        f"_Software powered by Annavya ERP (www.annavya.in)_"
+    )
+    encoded = urllib.parse.quote(msg)
+    wa_link = f"https://wa.me/{mobile}?text={encoded}" if mobile else ""
+    return msg, wa_link
 
 
 @app.on_event("startup")
@@ -19,6 +171,8 @@ def ensure_pos_schema():
                 ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';
                 ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';
                 ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_sent_at TIMESTAMPTZ;
+                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_invoice_status VARCHAR(40);
 
                 CREATE TABLE IF NOT EXISTS pos_mod.cash_counters (
                     id SERIAL PRIMARY KEY,
@@ -141,6 +295,29 @@ class PaymentPayload(BaseModel):
     counter_id: Optional[str] = None
     counter_name: Optional[str] = None
     terminal_ip: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_mobile: Optional[str] = None
+    send_whatsapp: Optional[bool] = True
+
+
+class WhatsAppUpiRequestPayload(BaseModel):
+    estimate_no: str
+    customer_mobile: str
+    customer_name: Optional[str] = "Valued Guest"
+    amount: Optional[float] = None
+    outlet_code: Optional[str] = "DEL01"
+    counter_name: Optional[str] = "Mithai Counter 1"
+    cashier_name: Optional[str] = "Priya Sharma"
+
+
+class WhatsAppInvoiceSendPayload(BaseModel):
+    invoice_no: Optional[str] = None
+    estimate_no: Optional[str] = None
+    customer_mobile: str
+    customer_name: Optional[str] = "Valued Guest"
+    outlet_code: Optional[str] = "DEL01"
+    counter_name: Optional[str] = "Mithai Counter 1"
+    cashier_name: Optional[str] = "Priya Sharma"
 
 
 class CashCounterPayload(BaseModel):
@@ -529,20 +706,27 @@ def collect_payment(estimate_no: str, payload: PaymentPayload):
         cnt_id = payload.counter_id or order.get("counter_id") or "CNT-01"
         cnt_name = payload.counter_name or order.get("counter_name") or "Mithai Counter 1"
         t_ip = payload.terminal_ip or order.get("terminal_ip") or "127.0.0.1"
+        cust_mobile = payload.customer_mobile or order.get("customer_mobile")
+        cust_name = payload.customer_name or order.get("customer_name")
 
         updated = conn.execute(
             """
             UPDATE pos_mod.pos_orders
             SET invoice_no = %s, status = %s, payment_splits = %s::jsonb, cashier_id = %s,
                 cashier_name = %s, counter_id = %s, counter_name = %s, terminal_ip = %s,
+                customer_mobile = COALESCE(%s, customer_mobile),
+                customer_name = COALESCE(%s, customer_name),
                 paid_at = NOW(), delivered_at = CASE WHEN %s THEN NOW() ELSE NULL END,
-                delivery_staff = CASE WHEN %s THEN %s ELSE NULL END
+                delivery_staff = CASE WHEN %s THEN %s ELSE NULL END,
+                whatsapp_invoice_status = CASE WHEN %s IS NOT NULL THEN 'READY' ELSE NULL END
             WHERE estimate_no = %s RETURNING *
             """,
             (
                 inv_no, next_status, json.dumps(payload.payment_splits), payload.cashier_id,
                 c_name, cnt_id, cnt_name, t_ip,
-                is_direct, is_direct, payload.cashier_id, estimate_no,
+                cust_mobile, cust_name,
+                is_direct, is_direct, payload.cashier_id,
+                cust_mobile, estimate_no,
             ),
         ).fetchone()
 
@@ -560,7 +744,86 @@ def collect_payment(estimate_no: str, payload: PaymentPayload):
         if is_direct:
             deduct_fefo_stock(conn, order["outlet_code"], order["items"], inv_no, payload.cashier_id)
 
-        return updated
+        res = dict(updated)
+        wa_msg, wa_link = format_whatsapp_tax_invoice(res)
+        res["whatsapp_invoice_msg"] = wa_msg
+        res["whatsapp_invoice_link"] = wa_link
+        res["whatsapp_mobile"] = clean_indian_mobile(cust_mobile or "")
+        return res
+
+
+@app.post("/whatsapp/send-upi-request")
+def send_whatsapp_upi_request(payload: WhatsAppUpiRequestPayload):
+    with get_conn() as conn:
+        order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (payload.estimate_no,)).fetchone()
+        if not order:
+            raise HTTPException(status_code=404, detail=f"Estimate '{payload.estimate_no}' not found")
+        
+        ord_dict = dict(order)
+        if payload.customer_mobile:
+            ord_dict["customer_mobile"] = payload.customer_mobile
+            conn.execute("UPDATE pos_mod.pos_orders SET customer_mobile = %s WHERE estimate_no = %s", (payload.customer_mobile, payload.estimate_no))
+        if payload.customer_name and payload.customer_name != "Valued Guest":
+            ord_dict["customer_name"] = payload.customer_name
+            conn.execute("UPDATE pos_mod.pos_orders SET customer_name = %s WHERE estimate_no = %s", (payload.customer_name, payload.estimate_no))
+        if payload.counter_name:
+            ord_dict["counter_name"] = payload.counter_name
+        if payload.cashier_name:
+            ord_dict["cashier_name"] = payload.cashier_name
+            
+        wa_msg, wa_link = format_whatsapp_upi_proforma(ord_dict)
+        clean_mob = clean_indian_mobile(ord_dict.get("customer_mobile") or "")
+        upi_intent = generate_upi_intent_uri("bikanervala.retail@icici", "Bikanervala Foods Pvt Ltd", float(ord_dict.get("grand_total", 0)), ord_dict.get("estimate_no"))
+        
+        return {
+            "success": True,
+            "estimate_no": ord_dict["estimate_no"],
+            "customer_mobile": clean_mob,
+            "whatsapp_link": wa_link,
+            "whatsapp_message": wa_msg,
+            "upi_intent_uri": upi_intent,
+            "amount": float(ord_dict.get("grand_total", 0)),
+            "message": f"UPI Proforma Payment request generated for WhatsApp ({clean_mob})!"
+        }
+
+
+@app.post("/whatsapp/send-invoice")
+def send_whatsapp_invoice(payload: WhatsAppInvoiceSendPayload):
+    with get_conn() as conn:
+        inv = payload.invoice_no
+        est = payload.estimate_no
+        if inv:
+            order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE invoice_no = %s", (inv,)).fetchone()
+        elif est:
+            order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (est,)).fetchone()
+        else:
+            raise HTTPException(status_code=400, detail="Either invoice_no or estimate_no is required")
+            
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+            
+        ord_dict = dict(order)
+        if payload.customer_mobile:
+            ord_dict["customer_mobile"] = payload.customer_mobile
+            conn.execute("UPDATE pos_mod.pos_orders SET customer_mobile = %s WHERE id = %s", (payload.customer_mobile, ord_dict["id"]))
+        if payload.customer_name and payload.customer_name != "Valued Guest":
+            ord_dict["customer_name"] = payload.customer_name
+            conn.execute("UPDATE pos_mod.pos_orders SET customer_name = %s WHERE id = %s", (payload.customer_name, ord_dict["id"]))
+            
+        conn.execute("UPDATE pos_mod.pos_orders SET whatsapp_sent_at = NOW(), whatsapp_invoice_status = 'SENT' WHERE id = %s", (ord_dict["id"],))
+        
+        wa_msg, wa_link = format_whatsapp_tax_invoice(ord_dict)
+        clean_mob = clean_indian_mobile(ord_dict.get("customer_mobile") or "")
+        
+        return {
+            "success": True,
+            "invoice_no": ord_dict.get("invoice_no") or ord_dict.get("estimate_no"),
+            "customer_mobile": clean_mob,
+            "whatsapp_link": wa_link,
+            "whatsapp_message": wa_msg,
+            "amount": float(ord_dict.get("grand_total", 0)),
+            "message": f"Tax Invoice copy generated for WhatsApp ({clean_mob})!"
+        }
 
 
 @app.post("/delivery/scan")

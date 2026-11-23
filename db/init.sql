@@ -459,6 +459,8 @@ CREATE TABLE pos_mod.pos_orders (
     counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1',
     cashier_name VARCHAR(100) DEFAULT 'Priya Sharma',
     terminal_ip VARCHAR(50) DEFAULT '127.0.0.1',
+    whatsapp_sent_at TIMESTAMPTZ,
+    whatsapp_invoice_status VARCHAR(40),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

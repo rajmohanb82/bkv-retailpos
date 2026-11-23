@@ -11,6 +11,11 @@ import {
   Clock,
   Store,
   UserCheck,
+  Send,
+  MessageSquare,
+  Smartphone,
+  Printer,
+  ShieldCheck,
 } from "lucide-react";
 import { formatINR } from "../api";
 import { UpiQrCode } from "./UpiQrCode";
@@ -323,82 +328,124 @@ export const RetailCustomerDisplay: React.FC = () => {
         <div className="col-span-5 p-6 flex flex-col justify-between bg-gradient-to-b from-[#091630] to-[#050C1B]">
           {data.isSettled ? (
             /* 1. Thank You & Settlement Success View */
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-5 animate-fade-in">
-              <div className="w-24 h-24 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-2xl animate-bounce">
-                <CheckCircle2 className="w-14 h-14" />
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-4 animate-fade-in">
+              <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-2xl animate-bounce">
+                <CheckCircle2 className="w-12 h-12" />
               </div>
               <div>
                 <h3 className="text-2xl font-black text-white">Payment Received!</h3>
-                <p className="text-sm text-emerald-300 font-semibold mt-1">
-                  Tax Invoice <b>{data.docId}</b> has been generated.
+                <p className="text-xs text-emerald-300 font-semibold mt-0.5">
+                  Tax Invoice <b>{data.docId}</b> has been generated & closed.
                 </p>
               </div>
 
-              <div className="bg-[#0C1A38] border border-emerald-500/30 rounded-2xl p-5 w-full max-w-sm space-y-2">
-                <div className="text-xs text-slate-400">Amount Paid</div>
+              <div className="bg-[#0C1A38] border border-emerald-500/30 rounded-2xl p-4 w-full max-w-sm space-y-2">
+                <div className="text-[11px] text-slate-400">Total Amount Settled</div>
                 <div className="text-3xl font-black text-emerald-400 font-mono">
                   {formatINR(data.grandTotal)}
                 </div>
-                <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-700">
-                  Mode: <b className="text-white">{data.paymentMode || "UPI"}</b> • Counter: <b>{data.counterName || "Mithai Counter 1"}</b>
+                <div className="text-[11px] text-slate-300 pt-1.5 border-t border-slate-700/80 flex items-center justify-between">
+                  <span>Mode: <b className="text-white">{data.paymentMode || "UPI"}</b></span>
+                  <span>Counter: <b className="text-white">{data.counterName || "Mithai Counter 1"}</b></span>
                 </div>
               </div>
 
-              <div className="text-xs text-slate-400 flex items-center gap-1.5">
+              {/* Automated Actions Notification Badge */}
+              <div className="w-full max-w-sm space-y-1.5">
+                <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs text-emerald-300 font-semibold">
+                  <Printer className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>40-Col Thermal Receipt Printed on Counter</span>
+                </div>
+
+                {data.customerMobile && (
+                  <div className="bg-green-950/40 border border-green-500/40 rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs text-green-300 font-semibold">
+                    <MessageSquare className="w-4 h-4 text-green-400 shrink-0" />
+                    <span className="truncate">Invoice copy sent to WhatsApp ({data.customerMobile})</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="text-xs text-slate-400 flex items-center gap-1.5 pt-1">
                 <HeartHandshake className="w-4 h-4 text-rose-400" />
-                <span>Thank you for choosing Bikanervala! Please collect your receipt.</span>
+                <span>Thank you for choosing Bikanervala! Please collect your fresh pack.</span>
               </div>
             </div>
           ) : hasItems ? (
-            /* 2. Active Payment QR & Instructions */
-            <div className="h-full flex flex-col justify-between space-y-4">
-              <div className="bg-[#0C1A38] border border-amber-500/30 rounded-3xl p-6 text-center shadow-xl space-y-4">
-                <div className="flex items-center justify-center gap-2">
-                  <QrCode className="w-5 h-5 text-amber-400" />
-                  <span className="text-sm font-extrabold uppercase tracking-wider text-amber-300">
-                    Scan & Pay via UPI
+            /* 2. Active Payment QR & Live Scanner View */
+            <div className="h-full flex flex-col justify-between space-y-3">
+              <div className="bg-[#0C1A38] border border-amber-500/30 rounded-3xl p-5 text-center shadow-xl space-y-3 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-300">
+                      Scan & Pay via UPI
+                    </span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-extrabold text-[10px] border border-emerald-500/30 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    LIVE SCANNER
                   </span>
                 </div>
 
-                {/* Live Dynamic UPI QR */}
-                <div className="bg-white p-4 rounded-2xl shadow-2xl inline-block border-2 border-amber-400/50">
+                {/* Live Dynamic UPI QR with Scanner Beam Effect */}
+                <div className="relative inline-block bg-white p-3.5 rounded-2xl shadow-2xl border-2 border-amber-400/60 overflow-hidden group">
                   <UpiQrCode
                     amount={data.grandTotal}
                     docId={data.docId || "POS-EST-LIVE"}
-                    size={180}
+                    size={175}
                     className="!p-0 !bg-transparent !border-0 !shadow-none"
                   />
+                  {/* Visual laser scan sweep animation */}
+                  <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-emerald-400 to-transparent opacity-80 animate-pulse pointer-events-none" style={{ top: "45%" }} />
                 </div>
 
-                <div>
-                  <div className="text-xs text-slate-400">Scan using any UPI App on your phone:</div>
-                  <div className="flex items-center justify-center gap-3 mt-2 font-bold text-xs text-slate-200">
-                    <span className="px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">Google Pay</span>
-                    <span className="px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">PhonePe</span>
-                    <span className="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/30">Paytm</span>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BHIM</span>
+                {/* WhatsApp Pay Link Active Banner if customer mobile is present */}
+                {data.customerMobile ? (
+                  <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl px-3 py-2 text-left flex items-start gap-2.5 text-xs text-emerald-200">
+                    <Smartphone className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-extrabold text-emerald-300 text-[11px] flex items-center gap-1">
+                        <span>📲 WhatsApp Pay Link Dispatched</span>
+                      </div>
+                      <div className="text-[10px] text-emerald-200/80 mt-0.5">
+                        Proforma & UPI Tap-to-Pay link sent to <b>{data.customerMobile}</b>. You can pay directly from WhatsApp!
+                      </div>
+                    </div>
                   </div>
+                ) : (
+                  <div className="text-[11px] text-slate-400">
+                    Scan with any UPI App or tap link on your phone
+                  </div>
+                )}
+
+                {/* Accepted Payment Apps Pills */}
+                <div className="flex items-center justify-center gap-1.5 flex-wrap pt-0.5 text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">Google Pay</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">PhonePe</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/30">Paytm</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">BHIM</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-green-500/20 text-green-300 border border-green-500/30">WhatsApp Pay</span>
                 </div>
 
-                <div className="pt-3 border-t border-slate-700/80 flex items-center justify-between text-xs font-semibold px-2">
-                  <span className="text-slate-400">Payment Status:</span>
+                <div className="pt-2.5 border-t border-slate-700/80 flex items-center justify-between text-[11px] font-semibold px-1">
+                  <span className="text-slate-400">Status:</span>
                   <span className="flex items-center gap-1.5 text-amber-400 font-bold">
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                    <span>Awaiting Payment ({data.paymentMode || "UPI / Cash"})</span>
+                    <span>Awaiting Payment ({data.paymentMode || "UPI"})</span>
                   </span>
                 </div>
               </div>
 
               {/* Safety & Purity Guarantee Card */}
-              <div className="bg-[#0B1730] border border-slate-800 rounded-2xl p-4 flex items-center gap-3.5">
+              <div className="bg-[#0B1730] border border-slate-800 rounded-2xl p-3.5 flex items-center gap-3">
                 <img
                   src="/bikanervala-customer-logo.png"
                   alt="Seal"
-                  className="w-10 h-10 object-contain drop-shadow"
+                  className="w-9 h-9 object-contain drop-shadow"
                 />
                 <div className="text-xs">
-                  <div className="font-bold text-slate-200">100% Desi Ghee & Fresh Guarantee</div>
-                  <div className="text-[11px] text-slate-400">All sweets prepared daily following traditional authentic recipes.</div>
+                  <div className="font-bold text-slate-200">100% Desi Ghee & Freshness Guarantee</div>
+                  <div className="text-[10px] text-slate-400">Traditional recipes crafted fresh daily with pure desi khand & khoya.</div>
                 </div>
               </div>
             </div>

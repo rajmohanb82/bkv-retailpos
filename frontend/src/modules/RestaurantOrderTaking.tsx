@@ -28,11 +28,15 @@ import {
   ArrowLeft,
   Printer,
   X,
+  MessageSquare,
+  Smartphone,
 } from "lucide-react";
 import { apiFetch, formatINR } from "../api";
 import { ItemSku, Outlet } from "../types";
 import { UpiQrCode } from "../components/UpiQrCode";
 import { print40ColumnThermalSlip } from "../utils/posHardware";
+import { WhatsAppDispatchModal } from "../components/WhatsAppDispatchModal";
+import { cleanIndianMobile } from "../utils/whatsappHelper";
 
 interface RestaurantOrderTakingProps {
   activeOutlet: string;
@@ -82,6 +86,11 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
   const [settleDiscount, setSettleDiscount] = useState<number>(0);
   const [cashReceived, setCashReceived] = useState<number>(0);
   const [settlingLoading, setSettlingLoading] = useState(false);
+  const [settleMobile, setSettleMobile] = useState<string>("");
+  const [settleCustomerName, setSettleCustomerName] = useState<string>("");
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
+  const [whatsAppModalMode, setWhatsAppModalMode] = useState<"PROFORMA_UPI" | "TAX_INVOICE">("PROFORMA_UPI");
+  const [whatsAppOrderData, setWhatsAppOrderData] = useState<any>(null);
 
   const notify = (ok: boolean, msg: string) => {
     setToast({ ok, msg });
@@ -382,6 +391,30 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
       if (res.order) {
         // Automatically print final Tax Invoice
         await print40ColumnThermalSlip(res.order, outletObj);
+
+        // WhatsApp Tax Invoice Dispatch
+        const cleanMob = cleanIndianMobile(settleMobile);
+        if (cleanMob) {
+          setWhatsAppOrderData({
+            docId: res.order.invoice_no || `INV-REST-${selectedTable}`,
+            customerName: settleCustomerName || `Table ${selectedTable} Guest`,
+            customerMobile: cleanMob,
+            items: res.order.items || existingTableItems,
+            subtotal: Number(res.order.subtotal || runningSubtotal),
+            discountAmount: Number(res.order.discount_amount || settleDiscount || 0),
+            cgst: Number(res.order.cgst || runningCgst),
+            sgst: Number(res.order.sgst || runningSgst),
+            grandTotal: Number(res.order.grand_total || runningGrandTotal),
+            paymentMode: settleMode,
+            paymentRef: settleRef || "PAID-UPI",
+            paidAt: res.order.paid_at || new Date().toISOString(),
+            outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+            counterName: `Restaurant Floor (Table ${selectedTable})`,
+            cashierName: actorName || "Restaurant Cashier",
+          });
+          setWhatsAppModalMode("TAX_INVOICE");
+          setWhatsAppModalOpen(true);
+        }
       }
 
       notify(
@@ -1298,14 +1331,88 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
               </div>
             </div>
 
+            {/* Customer Details for WhatsApp Receipt / Pay */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Customer WhatsApp Mobile
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-slate-400 font-bold font-mono text-xs">+91</span>
+                  <input
+                    type="tel"
+                    value={settleMobile.replace(/^\+?91/, "")}
+                    onChange={(e) => setSettleMobile(e.target.value)}
+                    placeholder="9811445566"
+                    maxLength={10}
+                    className="w-full pl-11 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                  Customer Name
+                </label>
+                <input
+                  type="text"
+                  value={settleCustomerName}
+                  onChange={(e) => setSettleCustomerName(e.target.value)}
+                  placeholder={`Table ${selectedTable} Guest`}
+                  className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold"
+                />
+              </div>
+            </div>
+
             {/* UPI QR Display & Screenshot Verification Mode */}
             {settleMode === "UPI" && (
               <div className="space-y-3">
-                <UpiQrCode
-                  amount={runningGrandTotal}
-                  docId={`REST-${selectedTable}`}
-                  size={155}
-                />
+                <div className="flex flex-col sm:flex-row items-center gap-3 bg-purple-50/50 dark:bg-purple-950/30 p-3 rounded-2xl border border-purple-200 dark:border-purple-800">
+                  <div className="shrink-0 bg-white p-2 rounded-xl border border-purple-200 shadow-sm">
+                    <UpiQrCode
+                      amount={runningGrandTotal}
+                      docId={`REST-${selectedTable}`}
+                      size={140}
+                      className="!p-0 !bg-transparent !border-0 !shadow-none"
+                    />
+                  </div>
+
+                  <div className="space-y-2 text-left min-w-0 flex-1">
+                    <div className="text-xs font-black text-purple-900 dark:text-purple-200">
+                      Scan or Send UPI Pay to WhatsApp
+                    </div>
+                    <div className="text-[11px] text-slate-500 leading-tight">
+                      Customer can scan the QR code from their chair or receive the Tap-to-Pay link directly on WhatsApp.
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWhatsAppOrderData({
+                          docId: `REST-${selectedTable}`,
+                          customerName: settleCustomerName || `Table ${selectedTable} Guest`,
+                          customerMobile: settleMobile,
+                          items: existingTableItems,
+                          subtotal: runningSubtotal,
+                          discountAmount: Number(settleDiscount || 0),
+                          cgst: runningCgst,
+                          sgst: runningSgst,
+                          grandTotal: runningGrandTotal,
+                          paymentMode: "UPI",
+                          outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+                          counterName: `Restaurant Dining Table ${selectedTable}`,
+                          cashierName: actorName || "Order Taking Staff",
+                        });
+                        setWhatsAppModalMode("PROFORMA_UPI");
+                        setWhatsAppModalOpen(true);
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>📲 Send UPI & Proforma to WhatsApp</span>
+                    </button>
+                  </div>
+                </div>
 
                 <div>
                   <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
@@ -1414,6 +1521,22 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* WhatsApp Dispatch Modal for Proforma UPI & Tax Invoice */}
+      {whatsAppOrderData && (
+        <WhatsAppDispatchModal
+          isOpen={whatsAppModalOpen}
+          onClose={() => setWhatsAppModalOpen(false)}
+          mode={whatsAppModalMode}
+          orderData={whatsAppOrderData}
+          onSent={(cleanMob) => {
+            notify(
+              true,
+              `Dispatched ${whatsAppModalMode === "PROFORMA_UPI" ? "UPI Proforma & Pay link" : "Tax Invoice"} to WhatsApp (${cleanMob})!`
+            );
+          }}
+        />
       )}
     </div>
   );
