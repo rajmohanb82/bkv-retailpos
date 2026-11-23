@@ -887,18 +887,6 @@ class WhatsAppBackendDispatchPayload(BaseModel):
 def collect_payment(estimate_no: str, payload: PaymentPayload):
     try:
         with get_conn() as conn:
-            # 1. Ensure required columns exist (self-healing for older database schemas)
-            conn.execute("""
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR(120);
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS customer_mobile VARCHAR(20);
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_id VARCHAR(40) DEFAULT 'CNT-01';
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS counter_name VARCHAR(80) DEFAULT 'Mithai Counter 1';
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(100) DEFAULT 'Priya Sharma';
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS terminal_ip VARCHAR(50) DEFAULT '127.0.0.1';
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_sent_at TIMESTAMPTZ;
-                ALTER TABLE pos_mod.pos_orders ADD COLUMN IF NOT EXISTS whatsapp_invoice_status VARCHAR(40);
-            """)
-
             order = conn.execute("SELECT * FROM pos_mod.pos_orders WHERE estimate_no = %s", (estimate_no,)).fetchone()
             if not order:
                 raise HTTPException(status_code=404, detail="Estimate not found")
@@ -960,26 +948,51 @@ def collect_payment(estimate_no: str, payload: PaymentPayload):
             cust_mobile = payload.customer_mobile or order.get("customer_mobile")
             cust_name = payload.customer_name or order.get("customer_name")
 
+            delivered_at_val = datetime.now() if is_direct else None
+            delivery_staff_val = payload.cashier_id if is_direct else None
+            wa_status_val = 'READY' if cust_mobile else None
+            splits_json = json.dumps(payload.payment_splits)
+
             updated = conn.execute(
                 """
                 UPDATE pos_mod.pos_orders
-                SET invoice_no = %s, status = %s, payment_splits = %s::jsonb, cashier_id = %s,
-                    cashier_name = %s, counter_id = %s, counter_name = %s, terminal_ip = %s,
+                SET invoice_no = %s,
+                    status = %s,
+                    payment_splits = %s::jsonb,
+                    cashier_id = %s,
+                    cashier_name = %s,
+                    counter_id = %s,
+                    counter_name = %s,
+                    terminal_ip = %s,
                     customer_mobile = COALESCE(%s, customer_mobile),
                     customer_name = COALESCE(%s, customer_name),
-                    paid_at = NOW(), delivered_at = CASE WHEN %s THEN NOW() ELSE NULL END,
-                    delivery_staff = CASE WHEN %s THEN %s ELSE NULL END,
-                    whatsapp_invoice_status = CASE WHEN %s IS NOT NULL THEN 'READY' ELSE NULL END
-                WHERE estimate_no = %s RETURNING *
+                    paid_at = NOW(),
+                    delivered_at = %s,
+                    delivery_staff = %s,
+                    whatsapp_invoice_status = %s
+                WHERE estimate_no = %s
+                RETURNING *
                 """,
                 (
-                    inv_no, next_status, json.dumps(payload.payment_splits), payload.cashier_id,
-                    c_name, cnt_id, cnt_name, t_ip,
-                    cust_mobile, cust_name,
-                    is_direct, is_direct, payload.cashier_id,
-                    cust_mobile, estimate_no,
+                    inv_no,
+                    next_status,
+                    splits_json,
+                    payload.cashier_id,
+                    c_name,
+                    cnt_id,
+                    cnt_name,
+                    t_ip,
+                    cust_mobile,
+                    cust_name,
+                    delivered_at_val,
+                    delivery_staff_val,
+                    wa_status_val,
+                    estimate_no,
                 ),
             ).fetchone()
+
+            if not updated:
+                raise HTTPException(status_code=404, detail=f"Order '{estimate_no}' could not be updated")
 
             # 3. Update cashier cash shift if Cash used
             try:
