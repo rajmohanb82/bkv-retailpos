@@ -173,7 +173,7 @@ export const RetailPos: React.FC<RetailPosProps> = ({
       paymentMode: order?.payment_splits?.[0]?.mode || payMode,
       paymentRef: order?.payment_splits?.[0]?.ref || "PAID-UPI",
       paidAt: order?.paid_at,
-      outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+      outletName: outletObj?.trade_name || "Bikanervala Karol Bagh Flagship",
       counterName: activeCounter?.counter_name || "Mithai Counter 1",
       cashierName: activeCounter?.cashier_name || actorName || "Priya Sharma",
     });

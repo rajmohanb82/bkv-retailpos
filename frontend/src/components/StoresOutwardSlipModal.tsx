@@ -144,7 +144,8 @@ export const StoresOutwardSlipModal: React.FC<StoresOutwardSlipModalProps> = ({
           <div class="center bold" style="font-size: 13px;">BIKANERVALA</div>
           <div class="center" style="font-size: 9px;">BIKANERVALA FOODS PVT. LTD.</div>
           <div class="center" style="font-size: 8.5px;">Central Stores & Multi-Store Inventory</div>
-          <div class="center" style="font-size: 8.5px;">GSTIN: 07AAACB1234F1Z5 | FSSAI: 13324001000451</div>
+          <div class="center" style="font-size: 8.5px;">10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005</div>
+          <div class="center" style="font-size: 8.5px;">GSTIN: 07AAAFB0115B1ZJ | FSSAI: 13324001000451</div>
           
           <div class="double-divider"></div>
           <div class="center bold" style="font-size: 11px;">STORES OUTWARD CHECKOUT SLIP</div>
@@ -261,7 +262,7 @@ export const StoresOutwardSlipModal: React.FC<StoresOutwardSlipModalProps> = ({
               Central Stores & Multi-Store Inventory
             </div>
             <div className="text-center text-[8.5px] text-slate-500">
-              GSTIN: 07AAACB1234F1Z5 | FSSAI: 13324001000451
+              GSTIN: 07AAAFB0115B1ZJ | FSSAI: 13324001000451
             </div>
 
             <div className="border-t border-dashed border-slate-400 my-2" />

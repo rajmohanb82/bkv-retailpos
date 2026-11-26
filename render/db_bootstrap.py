@@ -236,12 +236,16 @@ def apply_schema_migrations(cur):
     try:
         cur.execute("""
             UPDATE admin_mod.outlets
-            SET trade_name = 'Bikanervala Heritage Sweets',
+            SET name = 'Bikanervala Karol Bagh Flagship',
+                trade_name = 'Bikanervala Heritage Sweets',
                 legal_name = 'Bikanervala Foods Pvt. Ltd.',
-                gstin = '07AAACB1234F1Z5',
+                gstin = '07AAAFB0115B1ZJ',
                 fssai_no = '13324001000451',
                 outlet_type = 'Restaurant + Sweet Shop',
-                address = 'Block B-14, Inner Circle, Connaught Place'
+                address = '10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh',
+                city = 'New Delhi',
+                state = 'Delhi',
+                pincode = '110005'
             WHERE code = 'DEL01';
 
             UPDATE admin_mod.outlets
@@ -390,13 +394,24 @@ def apply_schema_migrations(cur):
     print("[Render DB Bootstrap] Schema migrations verified and applied successfully!")
 
 def import_datasource_if_needed(cur):
-    """Imports the 1,657 items from datasource_items.sql if not yet loaded."""
+    """Imports items & pricing from Excel files in datasource/ (falling back to SQL dump if needed)."""
     cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
     count = cur.fetchone()[0]
     print(f"[Render DB Bootstrap] Current items count in database: {count}")
     if count >= 1000:
         print(f"[Render DB Bootstrap] Datasource catalog already populated ({count} items present).")
         return
+
+    try:
+        from import_datasource import import_from_excel_files
+        imported = import_from_excel_files(cur)
+        if imported > 0:
+            cur.execute("SELECT COUNT(*) FROM admin_mod.items;")
+            new_count = cur.fetchone()[0]
+            print(f"[Render DB Bootstrap] Imported {imported} items from Excel! Total items: {new_count}")
+            return
+    except Exception as e:
+        print(f"[Render DB Bootstrap] Excel import warning: {e}")
 
     candidates = [
         "/app/render/datasource_items.sql",
@@ -411,7 +426,7 @@ def import_datasource_if_needed(cur):
             break
 
     if sql_path:
-        print(f"[Render DB Bootstrap] Importing 1,657 item catalog from {sql_path}...")
+        print(f"[Render DB Bootstrap] Falling back to SQL catalog from {sql_path}...")
         try:
             with open(sql_path, "r", encoding="utf-8") as f:
                 sql = f.read()
@@ -436,6 +451,10 @@ def bootstrap_database():
     init_sql_path = find_init_sql()
     print(f"[Render DB Bootstrap] Using SQL initialization script: {init_sql_path}")
 
+    render_dir = os.path.dirname(os.path.abspath(__file__))
+    if render_dir not in sys.path:
+        sys.path.insert(0, render_dir)
+
     with psycopg.connect(url, autocommit=True) as conn:
         with conn.cursor() as cur:
             cur.execute("SET client_encoding = 'UTF8';")
@@ -450,21 +469,28 @@ def bootstrap_database():
             row = cur.fetchone()
             is_initialized = row[0] if row else False
 
-            if not is_initialized:
-                print("[Render DB Bootstrap] Fresh database detected. Executing init.sql schema and seed records...")
-                with open(init_sql_path, "r", encoding="utf-8") as f:
-                    sql_script = f.read()
+            # Check if UAT clean reset has been performed or forced via RESET_DB_FOR_UAT=true
+            force_uat_reset = os.getenv("RESET_DB_FOR_UAT", "").strip().lower() in ("1", "true", "yes")
+            has_uat_marker = False
+            if is_initialized:
+                try:
+                    cur.execute("SELECT 1 FROM admin_mod.system_config WHERE config_key = 'uat_clean_reset_v1';")
+                    has_uat_marker = cur.fetchone() is not None
+                except Exception:
+                    has_uat_marker = False
 
-                cur.execute(sql_script)
-                print("[Render DB Bootstrap] Database schema and initial seed data created successfully!")
+            if force_uat_reset or not is_initialized or not has_uat_marker:
+                print("[Render DB Bootstrap] Performing clean UAT database wipe, Bikanervala branding init & Excel catalog import...")
+                from reset_uat_db import perform_uat_wipe_and_init
+                perform_uat_wipe_and_init(cur, init_sql_path, apply_schema_migrations)
             else:
-                print("[Render DB Bootstrap] Existing database detected.")
-
-            # ALWAYS apply migrations so any missing columns are created
-            apply_schema_migrations(cur)
-
-            # Auto-populate datasource catalog if needed (< 1000 items)
-            import_datasource_if_needed(cur)
+                print("[Render DB Bootstrap] Existing UAT-initialized database detected.")
+                # ALWAYS apply migrations so any missing columns are created
+                apply_schema_migrations(cur)
+                # Ensure branding & datasource catalog are populated
+                from reset_uat_db import initialize_bikanervala_branding
+                initialize_bikanervala_branding(cur)
+                import_datasource_if_needed(cur)
 
             # Verify core counts
             cur.execute("SELECT COUNT(*) FROM admin_mod.items;")

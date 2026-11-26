@@ -113,74 +113,90 @@ def import_from_excel_files(cur) -> int:
 
     imported = 0
 
-    # 1. Import Packaged Foods (Category: FG-Sweet)
+    # 1. Import Packaged Foods (Category: FG-Sweet) from both Bikanervala and Haldiram sheets
     if pkg_file:
-        print(f"[Import Datasource] Parsing Packaged Foods from {pkg_file}...")
-        rows = parse_excel_sheet(pkg_file, "Bikanervala")
-        # Header is row 6 (0-indexed)
-        if len(rows) > 7:
-            for idx, r in enumerate(rows[7:], start=1):
-                if len(r) < 5 or not r[1].strip():
-                    continue
-                cat = r[0].strip() or "Packaged Foods"
-                name = r[1].strip()
-                pack_variant = r[2].strip() if len(r) > 2 else "Standard Pack"
-                try:
-                    price = float(r[4].strip()) if r[4].strip() else 0.0
-                except ValueError:
+        for sheet_name, sku_prefix in [("Bikanervala", "PKD-BKV"), ("Haldiram", "PKD-HAL")]:
+            print(f"[Import Datasource] Parsing Packaged Foods [{sheet_name}] from {pkg_file}...")
+            rows = parse_excel_sheet(pkg_file, sheet_name)
+            # Header is row 6 (0-indexed)
+            if len(rows) > 7:
+                for idx, r in enumerate(rows[7:], start=1):
+                    if len(r) < 4 or not r[1].strip():
+                        continue
+                    cat = r[0].strip() or "Packaged Foods"
+                    name = r[1].strip()
+                    pack_variant = r[2].strip() if len(r) > 2 else "Standard Pack"
+                    raw_sell = r[4].strip() if len(r) > 4 else ""
+                    raw_orig = r[3].strip() if len(r) > 3 else ""
                     price = 0.0
-                sku = f"PKD-BKV-{idx:04d}"
+                    for candidate in (raw_sell, raw_orig):
+                        if candidate:
+                            try:
+                                price = float(candidate)
+                                if price > 0:
+                                    break
+                            except ValueError:
+                                continue
+                    if price <= 0:
+                        price = 100.0
+                    sku = f"{sku_prefix}-{idx:04d}"
+                    display_name = f"{name} ({pack_variant})" if pack_variant and pack_variant not in name else name
 
-                cur.execute("""
-                    INSERT INTO admin_mod.items (
-                        sku, name, category, sub_category, purchase_uom, inventory_uom, pos_uom,
-                        conversion_factor, hsn_code, gst_pct, selling_price, cost_price,
-                        shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
-                    ) VALUES (
-                        %s, %s, 'FG-Sweet', %s, 'Pack', 'Pack', 'Pack',
-                        1.0, '2106', 5.00, %s, ROUND(%s * 0.65, 2),
-                        180, 20.0, false, 'Sweet Counter', true, 'Packaged Goods'
-                    )
-                    ON CONFLICT (sku) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        selling_price = EXCLUDED.selling_price,
-                        sub_category = EXCLUDED.sub_category;
-                """, (sku, f"{name} ({pack_variant})" if pack_variant and pack_variant not in name else name, cat, price, price))
-                imported += 1
+                    cur.execute("""
+                        INSERT INTO admin_mod.items (
+                            sku, name, category, sub_category, purchase_uom, inventory_uom, pos_uom,
+                            conversion_factor, hsn_code, gst_pct, selling_price, cost_price,
+                            shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
+                        ) VALUES (
+                            %s, %s, 'FG-Sweet', %s, 'Pack', 'Pack', 'Pack',
+                            1.0, '2106', 5.00, %s, ROUND(%s * 0.65, 2),
+                            180, 20.0, false, 'Sweet Counter', true, 'Packaged Goods'
+                        )
+                        ON CONFLICT (sku) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            selling_price = EXCLUDED.selling_price,
+                            cost_price = EXCLUDED.cost_price,
+                            sub_category = EXCLUDED.sub_category;
+                    """, (sku, display_name, cat, price, price))
+                    imported += 1
 
-    # 2. Import Vegetarian Restaurant Menu (Category: FG-Rest)
+    # 2. Import Vegetarian Restaurant Menu (Category: FG-Rest) from both Bikanervala and Haldiram sheets
     if menu_file:
-        print(f"[Import Datasource] Parsing Vegetarian Menu from {menu_file}...")
-        rows = parse_excel_sheet(menu_file, "Bikanervala")
-        if len(rows) > 6:
-            for idx, r in enumerate(rows[6:], start=1):
-                if len(r) < 4 or not r[2].strip():
-                    continue
-                source_id = r[0].strip() or f"{idx:04d}"
-                cat = r[1].strip() or "Restaurant"
-                name = r[2].strip()
-                try:
-                    price = float(r[3].strip()) if r[3].strip() else 0.0
-                except ValueError:
-                    price = 0.0
-                sku = f"RST-BKV-{source_id}"
+        for sheet_name, sku_prefix in [("Bikanervala", "RST-BKV"), ("Haldiram", "RST-HAL")]:
+            print(f"[Import Datasource] Parsing Vegetarian Menu [{sheet_name}] from {menu_file}...")
+            rows = parse_excel_sheet(menu_file, sheet_name)
+            if len(rows) > 6:
+                for idx, r in enumerate(rows[6:], start=1):
+                    if len(r) < 4 or not r[2].strip():
+                        continue
+                    source_id = r[0].strip() or f"{idx:04d}"
+                    cat = r[1].strip() or "Restaurant"
+                    name = r[2].strip()
+                    try:
+                        price = float(r[3].strip()) if r[3].strip() else 0.0
+                    except ValueError:
+                        price = 0.0
+                    if price <= 0:
+                        price = 120.0
+                    sku = f"{sku_prefix}-{source_id}"[:30]
 
-                cur.execute("""
-                    INSERT INTO admin_mod.items (
-                        sku, name, category, sub_category, purchase_uom, inventory_uom, pos_uom,
-                        conversion_factor, hsn_code, gst_pct, selling_price, cost_price,
-                        shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
-                    ) VALUES (
-                        %s, %s, 'FG-Rest', %s, 'Portion', 'Portion', 'Portion',
-                        1.0, '9963', 5.00, %s, ROUND(%s * 0.40, 2),
-                        1, 10.0, false, 'Restaurant Kitchen', true, 'Prepared Food'
-                    )
-                    ON CONFLICT (sku) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        selling_price = EXCLUDED.selling_price,
-                        sub_category = EXCLUDED.sub_category;
-                """, (sku, name, cat, price, price))
-                imported += 1
+                    cur.execute("""
+                        INSERT INTO admin_mod.items (
+                            sku, name, category, sub_category, purchase_uom, inventory_uom, pos_uom,
+                            conversion_factor, hsn_code, gst_pct, selling_price, cost_price,
+                            shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
+                        ) VALUES (
+                            %s, %s, 'FG-Rest', %s, 'Portion', 'Portion', 'Portion',
+                            1.0, '9963', 5.00, %s, ROUND(%s * 0.40, 2),
+                            1, 10.0, false, 'Restaurant Kitchen', true, 'Prepared Food'
+                        )
+                        ON CONFLICT (sku) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            selling_price = EXCLUDED.selling_price,
+                            cost_price = EXCLUDED.cost_price,
+                            sub_category = EXCLUDED.sub_category;
+                    """, (sku, name, cat, price, price))
+                    imported += 1
 
     print(f"[Import Datasource] Successfully imported {imported} items from Excel sheets.")
     return imported

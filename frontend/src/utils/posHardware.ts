@@ -134,7 +134,7 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
   const docId = isPaid ? order?.invoice_no : order?.estimate_no;
   const last4 = String(docId || "").slice(-4);
   const tradeName = outlet?.trade_name || "Bikanervala Heritage Sweets";
-  const address = outlet?.address || "Connaught Place, New Delhi - 110001";
+  const address = outlet?.address || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005";
   const lines: string[] = [
     "========================================",
     "              BIKANERVALA               ",
@@ -142,7 +142,7 @@ export function buildEscPos40ColReceipt(order: any, outlet?: any): Uint8Array {
     "----------------------------------------",
     padLeft(padRight(tradeName.slice(0, 38), 38), 39),
     padLeft(padRight(address.slice(0, 38), 38), 39),
-    `GSTIN: ${outlet?.gstin || "07AAACB1234F1Z5"}`,
+    `GSTIN: ${outlet?.gstin || "07AAAFB0115B1ZJ"}`,
     `FSSAI: ${outlet?.fssai_no || "13324001000451"}`,
     "----------------------------------------",
     isPaid ? "           *** TAX INVOICE ***          " : "     *** ESTIMATE SLIP (NOT A BILL) *** ",
@@ -307,8 +307,8 @@ export async function print40ColumnThermalSlip(
   <div class="center bold" style="font-size:9.5px;color:#222;margin-bottom:2px;">SWEETS • RESTAURANT • CHAAT • NAMKEEN</div>
   <div class="center bold" style="font-size:10px;">${outlet?.trade_name || "Bikanervala Heritage Sweets"}</div>
   <div class="center" style="font-size:9.5px;color:#333;">${outlet?.legal_name || "Bikanervala Foods Pvt. Ltd."}</div>
-  <div class="center" style="font-size:9px;color:#333;">${outlet?.address || "Block B-14, Inner Circle, Connaught Place, New Delhi - 110001"}</div>
-  <div class="center bold" style="font-size:9.5px;margin-top:2px;">GSTIN: ${outlet?.gstin || "07AAACB1234F1Z5"}</div>
+  <div class="center" style="font-size:9px;color:#333;">${outlet?.address || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"}</div>
+  <div class="center bold" style="font-size:9.5px;margin-top:2px;">GSTIN: ${outlet?.gstin || "07AAAFB0115B1ZJ"}</div>
   <div class="center bold" style="font-size:9.5px;">FSSAI Lic No: ${outlet?.fssai_no || "13324001000451"}</div>
   ${isPaid
         ? `<div class="center bold" style="margin:4px auto;border:1.5px solid #000;background:#000;color:#fff;padding:2px 8px;display:inline-block;font-size:11px;">TAX INVOICE</div>`

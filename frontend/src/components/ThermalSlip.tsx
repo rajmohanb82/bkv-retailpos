@@ -75,10 +75,10 @@ export const ThermalSlip: React.FC<ThermalSlipProps> = ({ order, outlet }) => {
             {outlet?.legal_name || "Bikanervala Foods Pvt. Ltd."}
           </div>
           <div className="text-[9px] text-slate-600">
-            {outlet?.address || "Block B-14, Inner Circle, Connaught Place, New Delhi - 110001"}
+            {outlet?.address || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"}
           </div>
           <div className="text-[9.5px] font-bold text-slate-800 mt-1">
-            GSTIN: {outlet?.gstin || "07AAACB1234F1Z5"}
+            GSTIN: {outlet?.gstin || "07AAAFB0115B1ZJ"}
           </div>
           <div className="text-[9px] font-semibold text-slate-700">
             FSSAI Lic No: {outlet?.fssai_no || "13324001000451"}

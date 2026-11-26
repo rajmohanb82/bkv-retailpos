@@ -90,10 +90,10 @@ export function formatWhatsAppProformaText(p: WhatsAppProformaParams): string {
   const moreText = moreItemsCount > 0 ? `\n   _...and ${moreItemsCount} more item(s)_` : "";
 
   return (
-`✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨
+    `✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨
 _Taste of Tradition • Fresh Thinking_
-📍 ${p.outletName || "Connaught Place Flagship (New Delhi)"}
-GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451
+📍 ${p.outletName || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"}
+GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic: 13324001000451
 ---------------------------------------------
 📋 *PROFORMA BILL / ESTIMATE: #${p.estimateNo}*
 👤 *Guest:* ${p.customerName || "Valued Customer"}
@@ -104,7 +104,7 @@ ${itemsList}${moreText}
 ---------------------------------------------
 Subtotal: ₹${Number(p.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 ${p.discountAmount && p.discountAmount > 0 ? `Discount: -₹${Number(p.discountAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}\n` : ""}` +
-`Taxes (CGST 2.5% + SGST 2.5%): ₹${Number(p.cgst + p.sgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+    `Taxes (CGST 2.5% + SGST 2.5%): ₹${Number(p.cgst + p.sgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 💰 *PAYABLE AMOUNT: ₹${Number(p.grandTotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}*
 ---------------------------------------------
 📲 *TAP TO PAY VIA UPI / WHATSAPP PAY:*
@@ -164,10 +164,10 @@ export function formatWhatsAppInvoiceText(p: WhatsAppInvoiceParams): string {
     .join("\n");
 
   return (
-`✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨
+    `✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨
 _Taste of Tradition • Fresh Thinking_
-📍 ${p.outletName || "Connaught Place Flagship (New Delhi)"}
-GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451
+📍 ${p.outletName || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"}
+GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic: 13324001000451
 ---------------------------------------------
 🧾 *OFFICIAL GST TAX INVOICE*
 *Invoice No:* ${p.invoiceNo} ${p.estimateNo ? `(Ref: #${p.estimateNo})` : ""}
@@ -181,7 +181,7 @@ ${itemsList}
 ---------------------------------------------
 Subtotal: ₹${Number(p.subtotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 ${p.discountAmount && p.discountAmount > 0 ? `Discount Applied: -₹${Number(p.discountAmount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}\n` : ""}` +
-`CGST (2.5%): ₹${Number(p.cgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+    `CGST (2.5%): ₹${Number(p.cgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 SGST (2.5%): ₹${Number(p.sgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
 💰 *TOTAL PAID: ₹${Number(p.grandTotal).toLocaleString("en-IN", { minimumFractionDigits: 2 })}*
 ---------------------------------------------

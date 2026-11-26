@@ -408,7 +408,7 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
             paymentMode: settleMode,
             paymentRef: settleRef || "PAID-UPI",
             paidAt: res.order.paid_at || new Date().toISOString(),
-            outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+            outletName: outletObj?.trade_name || "Bikanervala Karol Bagh Flagship",
             counterName: `Restaurant Floor (Table ${selectedTable})`,
             cashierName: actorName || "Restaurant Cashier",
           });
@@ -1399,7 +1399,7 @@ export const RestaurantOrderTaking: React.FC<RestaurantOrderTakingProps> = ({
                           sgst: runningSgst,
                           grandTotal: runningGrandTotal,
                           paymentMode: "UPI",
-                          outletName: outletObj?.trade_name || "Bikanervala Connaught Place Flagship",
+                          outletName: outletObj?.trade_name || "Bikanervala Karol Bagh Flagship",
                           counterName: `Restaurant Dining Table ${selectedTable}`,
                           cashierName: actorName || "Order Taking Staff",
                         });

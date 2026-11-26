@@ -2670,8 +2670,8 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                   </div>
                   <div className="text-right text-[11px]">
                     <div className="font-black text-sm text-[#081F5C]">BIKANERVALA FOODS PVT LTD</div>
-                    <div>GSTIN: 07AAACB1234F1Z5 • FSSAI: 13324001000451</div>
-                    <div className="text-slate-600 font-medium">Connaught Place Flagship, New Delhi - 110001</div>
+                    <div>GSTIN: 07AAAFB0115B1ZJ • FSSAI: 13324001000451</div>
+                    <div className="text-slate-600 font-medium">10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005</div>
                     <div className="text-slate-500 text-[10px]">Ph: +91-11-47000000 • Email: corporate@bikanervala.com</div>
                   </div>
                 </div>
@@ -2705,7 +2705,7 @@ export const OmsModule: React.FC<OmsModuleProps> = ({ activeOutlet = "DEL01", in
                       <div className="text-slate-400 text-[11px]">Consumer / Unregistered</div>
                     )}
                     <div className="text-slate-500 text-[11px] mt-1">
-                      {quotationOrder.billing_address || "Connaught Place, New Delhi"}
+                      {quotationOrder.billing_address || "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"}
                     </div>
                   </div>
                   <div className="text-right space-y-1">

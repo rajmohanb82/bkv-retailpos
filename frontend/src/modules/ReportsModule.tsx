@@ -167,7 +167,7 @@ export const ReportsModule: React.FC = () => {
             <td colspan="${keys.length}" class="company-header" style="border:none;">BIKANERVALA FOODS PRIVATE LIMITED • ANNAVYA RETAIL ERP</td>
           </tr>
           <tr>
-            <td colspan="${keys.length}" class="sub-header" style="border:none;">Regd. Office: A-28, Lawrence Road Industrial Area, New Delhi - 110035 | CIN: U74899DL1988PTC034261 | GSTIN: 07AAACB1234F1Z5</td>
+            <td colspan="${keys.length}" class="sub-header" style="border:none;">Outlet: 10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005 | CIN: U74899DL1988PTC034261 | GSTIN: 07AAAFB0115B1ZJ</td>
           </tr>
           <tr>
             <td colspan="${keys.length}" class="title-row" style="border:none;">${reportTitle} • Scope: ${selectedOutlet} | Timeline: ${timeline.toUpperCase()} | Generated: ${new Date().toLocaleString()}</td>
@@ -1051,7 +1051,7 @@ export const ReportsModule: React.FC = () => {
                         Regd. Office: A-28, Lawrence Road Industrial Area, New Delhi - 110035, India
                       </div>
                       <div className="text-[10px] text-slate-500 font-mono">
-                        CIN: U74899DL1988PTC034261 • GSTIN: 07AAACB1234F1Z5 • FSSAI Lic. No: 10012011000123
+                        CIN: U74899DL1988PTC034261 • GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic. No: 13324001000451 • 10181/82 Gurudwara Road, Karol Bagh, New Delhi 110005
                       </div>
                     </div>
                   </div>

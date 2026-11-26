@@ -84,7 +84,7 @@ const SWEET_SHOWCASE = [
 export const RetailCustomerDisplay: React.FC = () => {
   const [data, setData] = useState<DualScreenPayload>({
     outletCode: "DEL01",
-    outletName: "Bikanervala Connaught Place Flagship",
+    outletName: "Bikanervala Karol Bagh Flagship",
     counterId: "CNT-DEL01-01",
     counterName: "Mithai Counter 1",
     cashierId: "CSH-DEL01-001",
@@ -484,7 +484,7 @@ export const RetailCustomerDisplay: React.FC = () => {
                   BIKANERVALA FOODS PRIVATE LIMITED
                 </div>
                 <div className="text-[11px] text-slate-400 font-mono">
-                  GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451
+                  GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic: 13324001000451
                 </div>
               </div>
             </div>

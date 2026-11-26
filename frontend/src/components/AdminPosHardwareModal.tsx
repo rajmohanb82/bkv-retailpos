@@ -98,7 +98,7 @@ export const AdminPosHardwareModal: React.FC<AdminPosHardwareModalProps> = ({
   isOpen,
   onClose,
   activeOutlet,
-  outletName = "Bikanervala Connaught Place Flagship",
+  outletName = "Bikanervala Karol Bagh Flagship",
   actorName = "Super Admin",
 }) => {
   const [settings, setSettings] = useState<PosHardwareSettings>(DEFAULT_HARDWARE_SETTINGS);
@@ -174,8 +174,8 @@ export const AdminPosHardwareModal: React.FC<AdminPosHardwareModalProps> = ({
       code: activeOutlet,
       trade_name: "Bikanervala Heritage Sweets",
       legal_name: "Bikanervala Foods Pvt. Ltd.",
-      address: "Connaught Place, New Delhi - 110001",
-      gstin: "07AAACB1234F1Z5",
+      address: "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005",
+      gstin: "07AAAFB0115B1ZJ",
       fssai_no: "13324001000451",
     };
 

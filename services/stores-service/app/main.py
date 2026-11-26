@@ -1238,7 +1238,7 @@ def search_raw_materials(
                     "contact_person": primary_vendor["contact_person"] if primary_vendor else "Procurement Desk",
                     "mobile": primary_vendor["mobile"] if primary_vendor else "+91-9811000008",
                     "email": primary_vendor["email"] if primary_vendor else "procurement@annavya.in",
-                    "gstin": primary_vendor["gstin"] if primary_vendor else "07AAACB1234F1Z5",
+                    "gstin": primary_vendor["gstin"] if primary_vendor else "07AAAFB0115B1ZJ",
                     "fssai_no": primary_vendor["fssai_no"] if primary_vendor else "10023011001234",
                     "lead_time_days": lead_time,
                     "moq": float(primary_vendor["moq"]) if primary_vendor else 10.0,

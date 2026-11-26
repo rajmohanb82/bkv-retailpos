@@ -53,7 +53,7 @@ def generate_upi_intent_uri(vpa: str, payee_name: str, amount: float, doc_id: st
     return f"upi://pay?pa={vpa}&pn={pn}&am={am}&cu=INR&tn={tn}"
 
 
-def format_whatsapp_upi_proforma(order: dict, outlet_name: str = "Connaught Place Flagship (New Delhi)") -> tuple[str, str]:
+def format_whatsapp_upi_proforma(order: dict, outlet_name: str = "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005") -> tuple[str, str]:
     mobile = clean_indian_mobile(order.get("customer_mobile") or "")
     items = order.get("items") or []
     if isinstance(items, str):
@@ -91,7 +91,7 @@ def format_whatsapp_upi_proforma(order: dict, outlet_name: str = "Connaught Plac
         f"✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨\n"
         f"_Taste of Tradition • Fresh Thinking_\n"
         f"📍 {outlet_name}\n"
-        f"GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451\n"
+        f"GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic: 13324001000451\n"
         f"---------------------------------------------\n"
         f"📋 *PROFORMA BILL / ESTIMATE: #{est_no}*\n"
         f"👤 *Guest:* {order.get('customer_name') or 'Valued Customer'}\n"
@@ -119,7 +119,7 @@ def format_whatsapp_upi_proforma(order: dict, outlet_name: str = "Connaught Plac
     return msg, wa_link
 
 
-def format_whatsapp_tax_invoice(order: dict, outlet_name: str = "Connaught Place Flagship (New Delhi)") -> tuple[str, str]:
+def format_whatsapp_tax_invoice(order: dict, outlet_name: str = "10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005") -> tuple[str, str]:
     mobile = clean_indian_mobile(order.get("customer_mobile") or "")
     items = order.get("items") or []
     if isinstance(items, str):
@@ -167,7 +167,7 @@ def format_whatsapp_tax_invoice(order: dict, outlet_name: str = "Connaught Place
         f"✨ *BIKANERVALA FOODS PRIVATE LIMITED* ✨\n"
         f"_Taste of Tradition • Fresh Thinking_\n"
         f"📍 {outlet_name}\n"
-        f"GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451\n"
+        f"GSTIN: 07AAAFB0115B1ZJ • FSSAI Lic: 13324001000451\n"
         f"---------------------------------------------\n"
         f"🧾 *OFFICIAL GST TAX INVOICE*\n"
         f"*Invoice No:* {inv_no} (Ref: #{order.get('estimate_no', 'N/A')})\n"
@@ -1184,7 +1184,19 @@ def get_digital_invoice(doc_id: str, format: Optional[str] = "html"):
         cashier = ord_dict.get("cashier_name") or ord_dict.get("cashier_id") or "Priya Sharma"
         counter = ord_dict.get("counter_name") or "Mithai Counter 1"
         outlet_code = ord_dict.get("outlet_code") or "DEL01"
-        outlet_display = f"Bikanervala Connaught Place Flagship (DEL01) • Inner Circle, New Delhi - 110001"
+        outlet_row = None
+        try:
+            outlet_row = conn.execute("SELECT name, address, city, state, pincode, gstin, fssai_no FROM admin_mod.outlets WHERE code = %s", (outlet_code,)).fetchone()
+        except Exception:
+            outlet_row = None
+        if outlet_row:
+            outlet_display = f"{outlet_row.get('name', 'Bikanervala')} ({outlet_code}) • {outlet_row.get('address', '')}, {outlet_row.get('city', 'New Delhi')}, {outlet_row.get('state', 'Delhi')} {outlet_row.get('pincode', '110005')}"
+            outlet_gstin = outlet_row.get("gstin") or "07AAAFB0115B1ZJ"
+            outlet_fssai = outlet_row.get("fssai_no") or "13324001000451"
+        else:
+            outlet_display = "Bikanervala Karol Bagh Flagship (DEL01) • 10181/82 Gurudwara Road, Bikanervala Chowk, Arya Samaj Rd, Karol Bagh, New Delhi, Delhi 110005"
+            outlet_gstin = "07AAAFB0115B1ZJ"
+            outlet_fssai = "13324001000451"
 
         # Item Rows HTML
         items_html = ""
@@ -1313,14 +1325,14 @@ def get_digital_invoice(doc_id: str, format: Optional[str] = "html"):
             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
                 <div>
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
-                        <div style="width: 36px; height: 36px; border-radius: 10px; background: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; color: #C8102E; font-size: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.2);">
-                            B
+                        <div style="width: 44px; height: 44px; border-radius: 10px; background: #ffffff; display: flex; align-items: center; justify-content: center; padding: 3px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); overflow: hidden;">
+                            <img src="/bikanervala-customer-logo.png" alt="Bikanervala" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.style.display='none'" />
                         </div>
                         <h1 style="font-size: 20px; font-weight: 900; letter-spacing: 0.5px; margin: 0;">BIKANERVALA</h1>
                     </div>
                     <div style="font-size: 11px; opacity: 0.9; font-weight: 600; letter-spacing: 0.5px;">BIKANERVALA FOODS PRIVATE LIMITED</div>
-                    <div style="font-size: 11px; opacity: 0.8; margin-top: 4px;">{outlet_display}</div>
-                    <div style="font-size: 10px; opacity: 0.85; margin-top: 2px; font-family: monospace;">GSTIN: 07AAACB1234F1Z5 • FSSAI Lic: 13324001000451</div>
+                    <div style="font-size: 11px; opacity: 0.85; margin-top: 4px;">{outlet_display}</div>
+                    <div style="font-size: 10px; opacity: 0.9; margin-top: 2px; font-family: monospace;">GSTIN: {outlet_gstin} • FSSAI Lic: {outlet_fssai}</div>
                 </div>
                 <div style="text-align: right;">
                     <div style="font-size: 10px; text-transform: uppercase; font-weight: 800; letter-spacing: 1px; opacity: 0.8;">Document Type</div>

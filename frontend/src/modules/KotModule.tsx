@@ -429,7 +429,7 @@ export const KotModule: React.FC<KotModuleProps> = ({ activeOutlet }) => {
             onChange={(e) => setKotOutlet(e.target.value)}
             className="text-xs font-bold px-3 py-2 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 outline-none"
           >
-            <option value="DEL01">DEL01 - Connaught Place</option>
+            <option value="DEL01">DEL01 - Karol Bagh Flagship</option>
             <option value="GUR02">GUR02 - CyberHub</option>
             <option value="JAI03">JAI03 - Jaipur</option>
             <option value="NOI04">NOI04 - Noida</option>

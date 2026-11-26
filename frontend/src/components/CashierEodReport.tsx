@@ -316,7 +316,7 @@ export const CashierEodReport: React.FC<CashierEodReportProps> = ({
 <body>
   <div class="header">
     <div style="display:flex;align-items:center;gap:12px;">
-      <img src="/bikanervala-logo.png" style="height:42px;object-fit:contain;" onerror="this.style.display='none'" />
+      <img src="/bikanervala-customer-logo.png" style="height:42px;object-fit:contain;" onerror="this.style.display='none'" />
       <div style="height:32px;width:1.5px;background:#cbd5e1;"></div>
       <img src="/annavya-badge-light.png" style="height:38px;object-fit:contain;" />
       <div>

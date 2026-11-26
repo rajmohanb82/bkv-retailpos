@@ -27,7 +27,7 @@ export const AdminRetailReportsModal: React.FC<AdminRetailReportsModalProps> = (
   isOpen,
   onClose,
   activeOutlet,
-  outletName = "Bikanervala Connaught Place Flagship",
+  outletName = "Bikanervala Karol Bagh Flagship",
 }) => {
   const [reportTab, setReportTab] = useState<
     "register" | "hourly" | "category" | "cashier" | "gst"
