@@ -326,9 +326,40 @@ def verify_gstin(gstin: str = Query(..., min_length=15, max_length=15)):
 
 # ---------------- MASTER CODE SEQUENCES & AUTO-INCREMENT ---------------- #
 
+def _ensure_code_sequences_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_mod.master_code_sequences (
+            id SERIAL PRIMARY KEY,
+            entity_type VARCHAR(40) UNIQUE NOT NULL,
+            prefix VARCHAR(20) NOT NULL,
+            current_number INT NOT NULL DEFAULT 1001,
+            padding_length INT NOT NULL DEFAULT 4,
+            reset_frequency VARCHAR(40) DEFAULT 'Fiscal Year',
+            description TEXT,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO admin_mod.master_code_sequences (entity_type, prefix, current_number, padding_length, reset_frequency, description)
+        VALUES
+        ('order', 'ORD-', 1001, 4, 'Fiscal Year', 'Bulk Corporate, Wedding & Hamper Orders sequence'),
+        ('item', 'SKU-', 2001, 4, 'Never', 'Master Item & Recipe SKU sequence'),
+        ('vendor', 'VND-', 101, 3, 'Never', 'Approved Vendor & Supplier code sequence'),
+        ('po', 'PO-', 2026, 4, 'Fiscal Year', 'Vendor Purchase Order sequence'),
+        ('estimate', 'EST-', 1001, 4, 'Daily', 'POS Counter Estimate slip sequence'),
+        ('invoice', 'INV-', 1001, 4, 'Fiscal Year', 'POS GST Tax Invoice sequence')
+        ON CONFLICT (entity_type) DO NOTHING;
+        """
+    )
+
+
 @app.get("/code-sequences")
 def list_code_sequences():
     with get_conn() as conn:
+        _ensure_code_sequences_table(conn)
         return conn.execute("SELECT * FROM admin_mod.master_code_sequences ORDER BY id").fetchall()
 
 
@@ -1313,7 +1344,7 @@ def get_payment_gateways():
                     "sodexo_pluxee_enabled": True,
                     "edenred_enabled": True,
                     "merchant_code": "PLUX_9831002",
-                    "food_only_restriction": true
+                    "food_only_restriction": True
                 }
             }
         return row["config_value"]
@@ -1573,14 +1604,8 @@ def ensure_rbac_and_hardware_seed():
                 );
                 """
             )
-            # Ensure order sequence exists in master_code_sequences
-            conn.execute(
-                """
-                INSERT INTO admin_mod.master_code_sequences (entity_type, prefix, current_number, padding_length, reset_frequency, description)
-                VALUES ('order', 'ORD-', 1001, 4, 'Fiscal Year', 'Bulk Corporate, Wedding & Hamper Orders sequence')
-                ON CONFLICT DO NOTHING;
-                """
-            )
+            # Ensure master_code_sequences table & order sequence exist
+            _ensure_code_sequences_table(conn)
     except Exception as e:
         print("Startup seed sync warning:", e)
 

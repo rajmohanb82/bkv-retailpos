@@ -103,11 +103,12 @@ def run_suite(base_url: str) -> int:
           ))
 
     # 4. Retail POS End-to-End (Estimate -> Pay -> Digital Invoice -> WhatsApp -> Shop Stock -> EOD)
-    check("POS", "POS Items", "GET", "/api/pos/items")
+    check("POS", "POS Orders", "GET", "/api/pos/orders?outlet_code=DEL01")
     check("POS", "Cash Counters", "GET", "/api/pos/counters?outlet_code=DEL01")
-    check("POS", "Promos", "GET", "/api/pos/promos")
-    check("POS", "Shop Stock", "GET", "/api/pos/shop/stock?outlet_code=DEL01")
-    check("POS", "EOD Report", "GET", "/api/pos/shop/eod?outlet_code=DEL01")
+    check("POS", "Shop Stock & Overview", "GET", "/api/pos/shop/overview?outlet_code=DEL01")
+    check("POS", "Shop EOD Stock Analysis", "GET", "/api/pos/shop/eod-stock-analysis?outlet_code=DEL01")
+    check("POS", "EOD Report", "GET", "/api/pos/reports/eod?outlet_code=DEL01")
+    check("POS", "GST Summary Report", "GET", "/api/pos/reports/gst-summary?outlet_code=DEL01")
 
     ok_est, est_data = check("POS", "Create Estimate", "POST", "/api/pos/estimates", body={
         "outlet_code": "DEL01",
@@ -149,30 +150,36 @@ def run_suite(base_url: str) -> int:
     # 5. KOT & Restaurant POS
     check("KOT", "Dining Tables (DEL01)", "GET", "/api/kot/tables?outlet_code=DEL01",
           validator=lambda d: (isinstance(d, list) and len(d) > 0, f"Tables={len(d) if isinstance(d, list) else 0}"))
-    check("KOT", "KDS Active Tickets", "GET", "/api/kot/kds")
+    check("KOT", "KOTs & KDS Tickets", "GET", "/api/kot/kots?outlet_code=DEL01")
 
     # 6. Stores & BOM
+    check("Stores", "Stores List", "GET", "/api/stores/stores")
     check("Stores", "Stock Batches", "GET", "/api/stores/batches")
-    check("Stores", "Material Requisitions", "GET", "/api/stores/requisitions")
-    check("Stores", "Raw Material Search", "GET", "/api/stores/search?q=milk")
-    check("Stores", "Stores Reports", "GET", "/api/stores/reports")
+    check("Stores", "Material Requisitions", "GET", "/api/stores/material-requisitions")
+    check("Stores", "Raw Material Search", "GET", "/api/stores/raw-materials/search?q=milk")
+    check("Stores", "Item-Wise Stock Report", "GET", "/api/stores/reports/item-wise-stock")
+    check("Stores", "Total Inventory Report", "GET", "/api/stores/reports/total-inventory")
+    check("Stores", "Vendor Procurement Report", "GET", "/api/stores/reports/vendor-procurement")
 
     # 7. Sweet Factory
     check("Factory", "Production Orders", "GET", "/api/factory/orders")
     check("Factory", "Kettles & Shifts", "GET", "/api/factory/kettles")
 
     # 8. OMS & Online Aggregators
-    check("OMS", "Bulk Orders", "GET", "/api/oms/bulk-orders")
+    check("OMS", "Bulk Orders", "GET", "/api/oms/orders")
+    check("OMS", "Bulk Orders Calendar", "GET", "/api/oms/orders/calendar")
     check("OMS", "Aggregator Orders (Zomato/Swiggy)", "GET", "/api/oms/aggregators/orders?status=PLACED")
     check("OMS", "Aggregator Config", "GET", "/api/oms/aggregators/config")
 
     # 9. Vendor & RFQ
     check("Vendor", "Vendors List", "GET", "/api/vendor/vendors")
     check("Vendor", "Tenders / RFQ", "GET", "/api/vendor/tenders")
-    check("Vendor", "Purchase Orders", "GET", "/api/vendor/pos")
+    check("Vendor", "Purchase Orders", "GET", "/api/vendor/purchase-orders")
 
     # 10. Executive Analytics & Reports
-    check("Analytics", "Executive Summary", "GET", "/api/analytics/executive-summary")
+    check("Analytics", "Executive Dashboard", "GET", "/api/analytics/executive-dashboard")
+    check("Analytics", "Reports Catalog", "GET", "/api/analytics/reports/catalog")
+    check("Analytics", "Executive Analytics", "GET", "/api/analytics/reports/executive-analytics")
 
     total = len(results)
     passed = sum(1 for r in results if r[5])
