@@ -141,6 +141,7 @@ def import_from_excel_files(cur) -> int:
                         price = 100.0
                     sku = f"{sku_prefix}-{idx:04d}"
                     display_name = f"{name} ({pack_variant})" if pack_variant and pack_variant not in name else name
+                    cost_price = round(price * 0.65, 2)
 
                     cur.execute("""
                         INSERT INTO admin_mod.items (
@@ -149,7 +150,7 @@ def import_from_excel_files(cur) -> int:
                             shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
                         ) VALUES (
                             %s, %s, 'FG-Sweet', %s, 'Pack', 'Pack', 'Pack',
-                            1.0, '2106', 5.00, %s, ROUND(%s * 0.65, 2),
+                            1.0, '2106', 5.00, %s, %s,
                             180, 20.0, false, 'Sweet Counter', true, 'Packaged Goods'
                         )
                         ON CONFLICT (sku) DO UPDATE SET
@@ -157,7 +158,7 @@ def import_from_excel_files(cur) -> int:
                             selling_price = EXCLUDED.selling_price,
                             cost_price = EXCLUDED.cost_price,
                             sub_category = EXCLUDED.sub_category;
-                    """, (sku, display_name, cat, price, price))
+                    """, (sku, display_name, cat, price, cost_price))
                     imported += 1
 
     # 2. Import Vegetarian Restaurant Menu (Category: FG-Rest) from both Bikanervala and Haldiram sheets
@@ -179,6 +180,7 @@ def import_from_excel_files(cur) -> int:
                     if price <= 0:
                         price = 120.0
                     sku = f"{sku_prefix}-{source_id}"[:30]
+                    cost_price = round(price * 0.40, 2)
 
                     cur.execute("""
                         INSERT INTO admin_mod.items (
@@ -187,7 +189,7 @@ def import_from_excel_files(cur) -> int:
                             shelf_life_days, min_par_level, is_loose_weighed, kitchen_station, active, item_type
                         ) VALUES (
                             %s, %s, 'FG-Rest', %s, 'Portion', 'Portion', 'Portion',
-                            1.0, '9963', 5.00, %s, ROUND(%s * 0.40, 2),
+                            1.0, '9963', 5.00, %s, %s,
                             1, 10.0, false, 'Restaurant Kitchen', true, 'Prepared Food'
                         )
                         ON CONFLICT (sku) DO UPDATE SET
@@ -195,7 +197,7 @@ def import_from_excel_files(cur) -> int:
                             selling_price = EXCLUDED.selling_price,
                             cost_price = EXCLUDED.cost_price,
                             sub_category = EXCLUDED.sub_category;
-                    """, (sku, name, cat, price, price))
+                    """, (sku, name, cat, price, cost_price))
                     imported += 1
 
     print(f"[Import Datasource] Successfully imported {imported} items from Excel sheets.")
